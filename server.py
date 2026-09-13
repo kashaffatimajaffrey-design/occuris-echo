@@ -65,7 +65,7 @@ def say(body: Say):
     # "waiting" line becomes "done" in place instead of being repeated.
     for a in tr.actions:
         line = {"key": a.idempotency_key, "app": a.app, "op": a.op, "status": a.status.value,
-                "text": a.detail or _pending_text(a, tr), "run": tr.run_id}
+                "text": a.detail or _pending_text(a, tr), "run": tr.run_id, "link": a.link or ""}
         for i, existing in enumerate(LOG):
             if existing.get("key") == a.idempotency_key:
                 if existing["status"] != "done" or a.status.value != "done":

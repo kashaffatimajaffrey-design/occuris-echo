@@ -79,6 +79,7 @@ class Action:
     detail: str = ""
     latency_ms: int = 0
     evidence: str = ""
+    link: str = ""          # where to see it in the real app — the receipt
 
 
 @dataclass

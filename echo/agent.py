@@ -301,7 +301,7 @@ class Agent:
                 s.recipient = Slot(r.get("recipient"), Source.deterministic if r.get("recipient") else Source.none, 0.9)
                 s.title = Slot(r.get("title"), Source.deterministic if r.get("title") else Source.none, 0.9)
                 subs.append(s)
-                actions.append(Action(r["app"], r["op"], r["idempotency_key"], Status(r["status"]), detail=r.get("readback") or r.get("evidence", "")))
+                actions.append(Action(r["app"], r["op"], r["idempotency_key"], Status(r["status"]), detail=r.get("readback") or r.get("evidence", ""), link=r.get("link") or ""))
         for r in pend:
             s = SubIntent(intent=Intent(r["intent"]))
             s.recipient = Slot(r.get("recipient"), Source.deterministic if r.get("recipient") else Source.none, 0.9, r.get("evidence", ""))
@@ -334,11 +334,13 @@ class Agent:
         for attempt in range(1 + 2):
             try:
                 detail = self._call(s)
-                a = Action(app, op, key, Status.done, detail=detail, latency_ms=int((time.time() - t0) * 1000), evidence=s.recipient.evidence or s.datetime.evidence)
+                link = (self.p.calls[-1].get("link", "") if getattr(self.p, "calls", None) else "")
+                a = Action(app, op, key, Status.done, detail=detail, latency_ms=int((time.time() - t0) * 1000),
+                           evidence=s.recipient.evidence or s.datetime.evidence, link=link)
                 self.p.ledger_append({"ts": _now(), "run_id": run_id, "intent": s.intent.value, "app": app, "op": op, "idempotency_key": key,
                                       "status": "done", "evidence": a.evidence, "readback": detail,
                                       "recipient": s.recipient.value, "title": s.title.value, "datetime": s.datetime.value,
-                                      "event_id": s.clause if s.intent == Intent.CREATE_EVENT else None})
+                                      "event_id": s.clause if s.intent == Intent.CREATE_EVENT else None, "link": link})
                 return a
             except ProviderError as e:
                 last_err = e

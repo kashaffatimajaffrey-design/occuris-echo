@@ -110,14 +110,14 @@ class Real:
         body_req = {"raw": raw}
         if thread_id: body_req["threadId"] = thread_id
         r = self._wrap("gmail", lambda: self.gmail.users().messages().send(userId="me", body=body_req).execute())
-        self.calls.append({"op": "gmail_reply", "to": to, "id": r["id"]})
+        self.calls.append({"op": "gmail_reply", "to": to, "id": r["id"], "link": f"https://mail.google.com/mail/u/0/#sent/{r['id']}"})
         return r["id"]
 
     def gmail_send(self, to, subject, body):
         msg = MIMEText(body); msg["to"] = to; msg["from"] = self.me; msg["subject"] = subject
         raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
         r = self._wrap("gmail", lambda: self.gmail.users().messages().send(userId="me", body={"raw": raw}).execute())
-        self.calls.append({"op": "gmail_send", "to": to, "id": r["id"]})
+        self.calls.append({"op": "gmail_send", "to": to, "id": r["id"], "link": f"https://mail.google.com/mail/u/0/#sent/{r['id']}"})
         return r["id"]
 
     def gmail_sent_count(self):
@@ -163,7 +163,7 @@ class Real:
         end = (datetime.fromisoformat(start_iso) + timedelta(minutes=minutes)).isoformat(timespec="minutes")
         body = {"summary": title, "start": {"dateTime": start_iso + ":00", "timeZone": TZ}, "end": {"dateTime": end + ":00", "timeZone": TZ}}
         r = self._wrap("calendar", lambda: self.cal.events().insert(calendarId="primary", body=body).execute())
-        self.calls.append({"op": "calendar_create", "id": r["id"]})
+        self.calls.append({"op": "calendar_create", "id": r["id"], "link": r.get("htmlLink", "")})
         return r["id"]
 
     def calendar_update(self, event_id, start_iso):
@@ -171,15 +171,15 @@ class Real:
         dur = datetime.fromisoformat(ev["end"]["dateTime"][:16]) - datetime.fromisoformat(ev["start"]["dateTime"][:16])
         end = (datetime.fromisoformat(start_iso) + dur).isoformat(timespec="minutes")
         ev["start"] = {"dateTime": start_iso + ":00", "timeZone": TZ}; ev["end"] = {"dateTime": end + ":00", "timeZone": TZ}
-        self._wrap("calendar", lambda: self.cal.events().update(calendarId="primary", eventId=event_id, body=ev).execute())
-        self.calls.append({"op": "calendar_update", "id": event_id})
+        upd = self._wrap("calendar", lambda: self.cal.events().update(calendarId="primary", eventId=event_id, body=ev).execute())
+        self.calls.append({"op": "calendar_update", "id": event_id, "link": upd.get("htmlLink", "")})
         return event_id
 
     def calendar_rename(self, event_id, title):
         ev = self.cal.events().get(calendarId="primary", eventId=event_id).execute()
         ev["summary"] = title
-        self._wrap("calendar", lambda: self.cal.events().update(calendarId="primary", eventId=event_id, body=ev).execute())
-        self.calls.append({"op": "calendar_rename", "id": event_id})
+        upd = self._wrap("calendar", lambda: self.cal.events().update(calendarId="primary", eventId=event_id, body=ev).execute())
+        self.calls.append({"op": "calendar_rename", "id": event_id, "link": upd.get("htmlLink", "")})
         return event_id
 
     def calendar_count(self):
@@ -188,14 +188,16 @@ class Real:
     # ------------------------------------------------------------ slack
     def slack_post(self, channel, text):
         r = self._wrap("slack", lambda: self.slack.chat_postMessage(channel=channel, text=text))
-        self.calls.append({"op": "slack_post", "channel": channel, "ts": r["ts"]})
+        team = os.getenv("SLACK_WORKSPACE", "occurisai")
+        link = f"https://{team}.slack.com/archives/{r['channel']}/p{r['ts'].replace('.', '')}"
+        self.calls.append({"op": "slack_post", "channel": channel, "ts": r["ts"], "link": link})
         return r["ts"]
 
     def slack_count(self):
         return len([c for c in self.calls if c["op"] == "slack_post"])
 
     # ------------------------------------------------------------ sheets: ledger + contacts
-    LEDGER_COLS = ["ts", "run_id", "intent", "app", "op", "idempotency_key", "status", "evidence", "readback", "recipient", "datetime", "message", "title", "conflict", "event_id"]
+    LEDGER_COLS = ["ts", "run_id", "intent", "app", "op", "idempotency_key", "status", "evidence", "readback", "recipient", "datetime", "message", "title", "conflict", "event_id", "link"]
 
     def ledger_append(self, row):
         values = [[str(row.get(c, "") if row.get(c) is not None else "") for c in self.LEDGER_COLS]]
@@ -206,7 +208,7 @@ class Real:
 
     def ledger_rows(self):
         if self._ledger_cache is None:
-            r = self.sheets.spreadsheets().values().get(spreadsheetId=self.sheet_id, range="ledger!A2:O").execute()
+            r = self.sheets.spreadsheets().values().get(spreadsheetId=self.sheet_id, range="ledger!A2:P").execute()
             rows = []
             for v in r.get("values", []):
                 v = v + [""] * (len(self.LEDGER_COLS) - len(v))

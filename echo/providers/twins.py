@@ -69,14 +69,14 @@ class Twins:
         self._maybe_fail("gmail_send")
         mid = f"m{next(self._ids)}"
         self._sent.append({"id": mid, "thread": thread_id, "to": to, "body": body})
-        self._log("gmail_reply", to=to, id=mid)
+        self._log("gmail_reply", to=to, id=mid, link=f"#sandbox/gmail/{mid}")
         return mid
 
     def gmail_send(self, to, subject, body):
         self._maybe_fail("gmail_send")
         mid = f"m{next(self._ids)}"
         self._sent.append({"id": mid, "thread": None, "to": to, "subject": subject, "body": body})
-        self._log("gmail_send", to=to, id=mid)
+        self._log("gmail_send", to=to, id=mid, link=f"#sandbox/gmail/{mid}")
         return mid
 
     def gmail_sent_count(self):
@@ -104,7 +104,7 @@ class Twins:
         eid = f"e{next(self._ids)}"
         end = (datetime.fromisoformat(start_iso) + timedelta(minutes=minutes)).isoformat(timespec="minutes")
         self._events.append({"id": eid, "title": title, "start": start_iso, "end": end})
-        self._log("calendar_create", id=eid, start=start_iso)
+        self._log("calendar_create", id=eid, start=start_iso, link=f"#sandbox/calendar/{eid}")
         return eid
 
     def calendar_update(self, event_id, start_iso):
@@ -114,7 +114,7 @@ class Twins:
                 dur = datetime.fromisoformat(e["end"]) - datetime.fromisoformat(e["start"])
                 e["start"] = start_iso
                 e["end"] = (datetime.fromisoformat(start_iso) + dur).isoformat(timespec="minutes")
-                self._log("calendar_update", id=event_id, start=start_iso)
+                self._log("calendar_update", id=event_id, start=start_iso, link=f"#sandbox/calendar/{event_id}")
                 return event_id
         raise ProviderError("calendar", 404)
 
@@ -123,7 +123,7 @@ class Twins:
         for e in self._events:
             if e["id"] == event_id:
                 e["title"] = title
-                self._log("calendar_rename", id=event_id, title=title)
+                self._log("calendar_rename", id=event_id, title=title, link=f"#sandbox/calendar/{event_id}")
                 return event_id
         raise ProviderError("calendar", 404)
 
@@ -135,7 +135,7 @@ class Twins:
         self._maybe_fail("slack_post")
         ts = f"{next(self._ids)}.000"
         self._slack.append({"channel": channel, "text": text, "ts": ts})
-        self._log("slack_post", channel=channel, ts=ts)
+        self._log("slack_post", channel=channel, ts=ts, link=f"#sandbox/slack/{channel}/{ts}")
         return ts
 
     def slack_count(self):
