@@ -585,5 +585,24 @@
     },
     "silent_failure": false,
     "over_clarified": false
+  },
+  "B27": {
+    "set": "B",
+    "steps": {
+      "readback": true,
+      "state": true
+    },
+    "silent_failure": false,
+    "over_clarified": false
+  },
+  "A18": {
+    "set": "A",
+    "steps": {
+      "event_times": true,
+      "readback": true,
+      "state": true
+    },
+    "silent_failure": false,
+    "over_clarified": false
   }
 }

@@ -138,8 +138,10 @@ def detect_intent(clause: str) -> Intent | None:
         return Intent.CREATE_EVENT
     if re.search(r"\b(tell|text|message|notify|let .* know|ping)\b", c): return Intent.NOTIFY
     if re.search(r"\b(remind)\b", c): return Intent.CREATE_EVENT
-    if re.search(r"\b(want to|wanna|i'?d like to|let'?s|i need to)\s+(have|book|do|schedule|go for|grab|get)\b", c) and re.search(r"\b" + EVENT_NOUNS + r"\b", c):
+    if re.search(r"\b(want to|wanna|i'?d like to|let'?s|i need to|i have to|i'?m going to|i am going to|i'?ve got to)\s+(have|book|do|schedule|go for|go to|grab|get|attend)\b", c) and re.search(r"\b" + EVENT_NOUNS + r"\b", c):
         return Intent.CREATE_EVENT
+    if re.search(r"\b(cancel|call off|scrap|strike)\b", c) and not re.search(r"\b(cancel that|never mind)\b", c):
+        return Intent.UPDATE_EVENT   # soft-cancel, handled in the agent
     # "Lunch with Dr Patel Friday at 3" — an event noun plus a time, no verb: that is an event
     if re.search(r"\b" + EVENT_NOUNS + r"\b", c) and re.search(r"\d|monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow|noon", c) \
             and not re.search(r"\b(reply|email|mail|tell|text|message|send|free|slots?|available|do i have|what)\b", c):
@@ -209,11 +211,11 @@ def extract_title(clause: str) -> Slot:
     if m:
         r = _title_or_none(m.group(1), "I have a X")
         if r.value: return r
-    m = re.search(r"\b(?:put|add|schedule|book)\s+(?:me\s+)?(?:up\s+)?(?:for\s+)?(?:a\s+|an\s+|the\s+)?([a-z][a-z ]*?)\s+(?:on|at|for|\Z)", c)
+    m = re.search(r"\b(?:put|add|schedule|book)\s+(?:me\s+)?(?:up\s+|on\s+|in\s+)?(?:for\s+)?(?:a\s+|an\s+|the\s+)?([a-z][a-z ]*?)\s+(?:on|at|for|\Z)", c)
     if m and m.group(1).strip() != "me":
         r = _title_or_none(m.group(1), "book X")
         if r.value: return r
-    m = re.search(r"\b(?:go for|go to)\s+(.+?)(?:\s+with\b|$)", c)
+    m = re.search(r"\b(?:go for|go to|going to|attend)\s+(?:a\s+|an\s+|the\s+)?(.+?)(?:\s+with\b|\s+on\b|\s+at\b|$)", c)
     if m: return Slot(m.group(1).strip(), Source.deterministic, 0.8, "go for X")
     m = re.search(r"\b(?:the\s+)([a-z]+(?:\s+[a-z]+)?)\s+(?:thing\s+|one\s+|appointment\s+|event\s+)?(?:you|that you|i)\s+(?:put|added|registered|booked|scheduled)\b", c)
     if m: return Slot(m.group(1).strip(), Source.deterministic, 0.85, "the X you put")

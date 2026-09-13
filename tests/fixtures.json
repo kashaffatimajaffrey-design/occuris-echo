@@ -1344,6 +1344,44 @@
           "sent": 1
         }
       }
+    },
+    {
+      "id": "B27",
+      "set": "B",
+      "turns": [
+        "Put dentist on Friday at 10",
+        "Cancel the dentist"
+      ],
+      "expect": {
+        "readback_has": [
+          "marked it cancelled",
+          "Cancelled"
+        ],
+        "state": {
+          "events": 1
+        }
+      }
+    },
+    {
+      "id": "A18",
+      "set": "A",
+      "turns": [
+        "I have to go to a concert. Am I free on Thursday?",
+        "The concert is at seven PM. Do I have anything on Thursday at 7?"
+      ],
+      "expect": {
+        "readback_has": [
+          "concert",
+          "Thursday",
+          "7 pm"
+        ],
+        "state": {
+          "events": 1
+        },
+        "event_times": [
+          "19:00"
+        ]
+      }
     }
   ]
 }

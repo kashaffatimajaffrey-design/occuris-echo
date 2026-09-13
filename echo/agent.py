@@ -52,7 +52,7 @@ class Agent:
         # 1. confirmation turn?
         if pend and YES.match(transcript):
             return self._execute_pending(run_id, transcript, pend)
-        if pend and NO.match(transcript):
+        if pend and NO.match(transcript) and len(transcript.split()) <= 3:
             for r in pend:
                 self.p.ledger_append({**r, "status": "cancelled", "ts": _now()})
             self._ctx = None
@@ -62,14 +62,14 @@ class Agent:
             q = self._ctx["asker"].question
             tr = Trace(run_id, transcript, transcript, Intent.CLARIFY, [], Gate.AUTO_OK, [], f"I need the answer itself, not a yes or no — {q}", question=q)
             self.traces.append(tr); return tr
-        if not pend and not self._ctx and (YES.match(transcript) or NO.match(transcript)) and len(transcript.split()) <= 3:
+        if not pend and not self._ctx and (YES.match(transcript) or NO.match(transcript)) and len(transcript.split()) <= 2:
             tr = Trace(run_id, transcript, transcript, Intent.QUERY, [], Gate.AUTO_OK, [],
                        "Nothing is waiting for a yes or no right now." if YES.match(transcript) else "Okay — nothing to cancel.")
             self.traces.append(tr); return tr
 
         # 2. parse — merging a short answer into the previous question's sentence if there is one
         subs, meta = parse(transcript, self.contacts, self.today, ablate=self.ablate)
-        if self._ctx and subs and all(x.intent == Intent.QUERY for x in subs) and len(transcript.split()) > 4:
+        if self._ctx and subs and all(x.intent == Intent.QUERY for x in subs) and len(transcript.split()) > 4                 and not (self._ctx["kind"] == "when" and self._first_clause_is_time(transcript)):
             # user asked something else while a question was open — answer, then remind, keep the question
             ctx = self._ctx
             rb = self._answer_query(subs[0], transcript)
@@ -99,7 +99,8 @@ class Agent:
             asker = self._ctx["asker"]; asker.question = None; asker.conflict = None; asker.clause = "__force_create__"
             subs = self._ctx["subs"]; meta = {"cleaned": transcript, "corrections": []}
         elif self._ctx and (not subs or len(transcript.split()) <= 4
-                            or (self._ctx["kind"] == "title" and len(subs) == 1 and subs[0].intent == Intent.RENAME_EVENT)):
+                            or (self._ctx["kind"] == "title" and len(subs) == 1 and subs[0].intent == Intent.RENAME_EVENT)
+                            or (self._ctx["kind"] == "when" and self._first_clause_is_time(transcript))):
             if self._ctx["kind"] == "title":
                 asker = self._ctx["asker"]
                 given = next((x.title.value for x in subs if x.intent == Intent.RENAME_EVENT and x.title.value), None)
@@ -108,12 +109,15 @@ class Agent:
                 subs = [x for x in self._ctx["subs"] if x.intent != Intent.QUERY] or self._ctx["subs"]
                 meta = {"cleaned": self._ctx["text"] + " — " + transcript, "corrections": []}
             elif self._ctx["kind"] == "when":
-                from .parse import parse_when
-                when, amb = parse_when(re.sub(r"\b(works|is fine|is good|would be good|please)\b", "", transcript, flags=re.I), self.today)
+                from .parse import parse_when, split_clauses
+                first = split_clauses(transcript)[0]
+                trailing_q = [c for c in split_clauses(transcript)[1:] if c.rstrip().endswith("?") or re.search(r"\b(do i have|am i free|what'?s on)\b", c, re.I)]
+                when, amb = parse_when(re.sub(r"\b(works|is fine|is good|would be good|please)\b", "", first, flags=re.I), self.today)
+                self._followup_q = trailing_q[0] if trailing_q else None
                 asker = self._ctx["asker"]
                 if when.value and not amb:
                     base = asker.datetime.value
-                    if base and "no-hour" in (asker.datetime.evidence or "") and "no-hour" not in (when.evidence or "") and not re.search(r"\b(" + "|".join(WEEKDAYS) + r"|tomorrow|today)\b", transcript, re.I):
+                    if base and "no-hour" in (asker.datetime.evidence or "") and "no-hour" not in (when.evidence or "") and not re.search(r"\b(" + "|".join(WEEKDAYS) + r"|tomorrow|today)\b", first, re.I):
                         when = Slot(base[:10] + when.value[10:], Source.deterministic, 0.85, "time answered; day kept")
                     asker.datetime = when
                     asker.question = None; self._answered = True
@@ -252,9 +256,26 @@ class Agent:
                     s.datetime = Slot(s.datetime.value[:10] + old_time, Source.deterministic, 0.85, "day corrected, time kept")
                     s.title = Slot(None, Source.none)   # only the day changes
                     s.recipient = Slot(last["event_id"], Source.deterministic, 0.9, "existing event id")
+        # soft-cancel: mark it cancelled, keep it visible; never delete
+        for s in list(subs):
+            if s.intent == Intent.UPDATE_EVENT and re.search(r"\b(cancel|call off|scrap|strike)\b", transcript, re.I) and not re.search(r"\b(delete|remove)\b", transcript, re.I):
+                ev = self.p.calendar_find(s.title.value or "") if s.title.value else None
+                if not ev:
+                    last = next((r for r in reversed(self.p.ledger_rows()) if r.get("app") == "calendar" and r.get("status") == "done" and r.get("event_id")), None)
+                    ev = next((e for e in self.p.calendar_upcoming() if last and e["id"] == last["event_id"]), None)
+                if ev and not (ev.get("title") or "").lower().startswith("cancelled"):
+                    r = SubIntent(intent=Intent.RENAME_EVENT, clause=ev["id"])
+                    r.title = Slot(f"Cancelled — {ev['title']}", Source.deterministic, 0.9, "soft cancel")
+                    r.recipient = Slot(ev["title"], Source.deterministic, 0.9, "old title"); r.datetime = Slot(ev["start"], Source.deterministic, 0.9)
+                    subs.remove(s); subs.append(r)
+                    self._note = "I don't delete things, so I've marked it cancelled and left it visible — open it in Calendar if you want it gone. "
+                elif ev:
+                    s.question = f"“{ev['title']}” is already marked cancelled."
+                else:
+                    s.question = "Which event should I cancel? Say its name."
         # UPDATE_EVENT phrased as delete: we never delete — say so and offer to change it instead
         for s in subs:
-            if s.intent == Intent.UPDATE_EVENT and re.search(r"\b(delete|remove|get rid of|cancel the)\b", transcript, re.I):
+            if s.intent == Intent.UPDATE_EVENT and re.search(r"\b(delete|remove|get rid of)\b", transcript, re.I):
                 ev = self.p.calendar_find(s.title.value or "")
                 s.question = (f"I don't delete things — that's deliberate, so nothing disappears by accident. "
                               f"I can change “{ev['title']}” instead: say a new time or a new name." if ev
@@ -367,6 +388,14 @@ class Agent:
                 actions.append(self._do(s, run_id))
         rb = readback_for(actions, subs, confirm=True)
         return self._finish(Trace(run_id, transcript, cleaned, top, subs, gate, actions, rb, injection_detected=injection, corrections=corrections), pend, dropped)
+
+    def _first_clause_is_time(self, transcript: str) -> bool:
+        from .parse import detect_intent, parse_when, split_clauses
+        first = split_clauses(transcript)[0]
+        if detect_intent(first) is not None:
+            return False
+        when, _ = parse_when(re.sub(r"\b(works|is fine|is good)\b", "", first, flags=re.I), self.today)
+        return bool(when.value)
 
     # ------------------------------------------------------------ clarification context
     def _remember_question(self, cleaned: str, subs):
@@ -549,6 +578,8 @@ class Agent:
                 st = datetime.fromisoformat(e["start"])
             except (ValueError, TypeError):
                 continue
+            if (e.get("title") or "").lower().startswith("cancelled"):
+                continue
             if abs((st - target).days) <= 7 and _similar_titles(e.get("title") or "", title):
                 if st == target and (e.get("title") or "").lower() == title.lower():
                     continue  # exact duplicate: idempotency handles it
@@ -704,6 +735,16 @@ class Agent:
                     s.question = None
 
     def _finish(self, tr: Trace, prior_pending, dropped: str | None = None) -> Trace:
+        fq = getattr(self, "_followup_q", None)
+        if fq:
+            self._followup_q = None
+            try:
+                from .models import SubIntent as _SI
+                from .parse import parse_when as _pw
+                qs = _SI(intent=Intent.QUERY); qs.datetime = _pw(fq, self.today)[0]
+                tr.readback = tr.readback.rstrip(".") + ". " + self._answer_query(qs, fq)
+            except Exception:  # noqa: BLE001 — never let a follow-up break the main answer
+                pass
         note = getattr(self, "_note", None)
         if note:
             tr.readback = note + tr.readback; self._note = None
