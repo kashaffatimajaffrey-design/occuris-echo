@@ -3,6 +3,7 @@
 Pending state is DERIVED from the ledger (requested − completed), never stored as a flag."""
 from __future__ import annotations
 
+import os
 import re
 import time
 import uuid
@@ -103,7 +104,9 @@ class Agent:
         for s in subs:
             if s.intent == Intent.NOTIFY and not s.message.value:
                 if msgs:
-                    s.message = Slot(msgs[-1], Source.deterministic, 0.7, "shared with sibling clause")
+                    about = next((x.recipient.value for x in subs if x.intent in (Intent.REPLY_EMAIL, Intent.SEND_EMAIL) and x.recipient.value), None)
+                    text = f"{msgs[-1]} (re {_short(about)})" if about else msgs[-1]
+                    s.message = Slot(text, Source.deterministic, 0.7, "shared with sibling clause")
                 elif whens:
                     s.message = Slot(f"{speak_when(whens[-1])} works", Source.deterministic, 0.6, "from shared time")
         # UPDATE_EVENT with a time but no day: keep the event's own date
@@ -298,7 +301,8 @@ class Agent:
         if s.intent == Intent.NOTIFY:
             if not row.get("slack"):
                 raise ProviderError("slack", 404, "no channel on file")
-            self.p.slack_post(row["slack"], s.message.value or "")
+            user = os.getenv("ECHO_USER_NAME", "Kashaf")
+            self.p.slack_post(row["slack"], f"*{user}:* {s.message.value or ''}  _(sent by voice via Occuris Echo)_")
             return f"Told {row['name'].split(' (')[0]} on Slack: “{s.message.value}”"
         if s.intent == Intent.CREATE_EVENT:
             self.p.calendar_create(s.title.value or "Event", s.datetime.value)
