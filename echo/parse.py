@@ -175,7 +175,7 @@ def extract_title(clause: str) -> Slot:
         return Slot(m.group(1).strip(), Source.deterministic, 0.9, "put X on calendar")
     m = re.search(r"\bi(?:'ve| have)? ?(?:got|have) (?:a|an|the)\s+([a-z ]+?)\s+(?:at|on|with|friday|monday|tuesday|wednesday|thursday|saturday|sunday|tomorrow)\b", c) or re.search(r"\bi(?:'ve| have)? ?(?:got|have) (?:a|an|the)\s+([a-z]+)", c)
     if m: return Slot(m.group(1).strip(), Source.deterministic, 0.85, "I have a X")
-    m = re.search(r"\b(?:add|schedule|book)\s+(?:me\s+)?(?:up\s+)?(?:for\s+)?(?:a\s+|an\s+|the\s+)?([a-z][a-z ]*?)\s+(?:on|at|for|\Z)", c)
+    m = re.search(r"\b(?:put|add|schedule|book)\s+(?:me\s+)?(?:up\s+)?(?:for\s+)?(?:a\s+|an\s+|the\s+)?([a-z][a-z ]*?)\s+(?:on|at|for|\Z)", c)
     if m and m.group(1).strip() not in ("me", "it", "that"):
         return Slot(m.group(1).strip(), Source.deterministic, 0.8, "book X")
     m = re.search(r"\b(?:go for|go to)\s+(.+?)(?:\s+with\b|$)", c)

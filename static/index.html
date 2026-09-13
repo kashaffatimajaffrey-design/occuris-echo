@@ -79,6 +79,10 @@ header{display:flex;align-items:center;justify-content:space-between;padding:24p
 .dot.pending{background:var(--wait-soft);color:var(--wait)} .dot.skipped_duplicate{background:var(--wait-soft);color:var(--wait)} .dot.info{background:var(--accent-soft);color:var(--accent)}
 .meta{font-size:11px;font-weight:650;letter-spacing:.075em;text-transform:uppercase;color:var(--text-3);margin-bottom:3px}
 .item p{margin:0;font-size:15.5px;line-height:1.5}
+.open{display:inline-flex;align-items:center;gap:6px;min-height:44px;padding:0 16px;margin-top:10px;border-radius:999px;background:var(--sunk);border:1px solid var(--hair);color:var(--text);font-size:14px;font-weight:500;text-decoration:none}
+.open:hover{border-color:var(--text-3)}
+.toggle{display:inline-flex;align-items:center;gap:8px;cursor:pointer;color:var(--text-2)}
+.toggle input{width:20px;height:20px;accent-color:var(--accent)}
 .tally{display:flex;align-items:center;gap:8px;margin-top:14px;padding-left:4px;font-size:13px;color:var(--text-3)}
 .tally b{color:var(--text-2);font-weight:600}
 .raw{margin-top:10px;font-size:12.5px;color:var(--text-3)} .raw b{color:var(--text-2);font-weight:500}
@@ -117,6 +121,7 @@ header{display:flex;align-items:center;justify-content:space-between;padding:24p
 <div class="prefs">
   Voice <select id="voice" aria-label="Voice"></select>
   Speed <select id="rate" aria-label="Speed"><option>0.8</option><option selected>1</option><option>1.3</option><option>1.6</option></select>
+  <label class="toggle"><input type="checkbox" id="autoopen"> Open the app after each action</label>
 </div>
 <p class="hint">Nothing is sent until you say yes. <kbd>Space</kbd> to speak · <kbd>Esc</kbd> to cancel</p>
 <p class="raw" id="raw" hidden></p>
@@ -158,6 +163,11 @@ function loadVoices(){voices=speechSynthesis.getVoices().filter(v=>v.lang.starts
   try{const s=localStorage.getItem('echo-voice');if(s)sel.value=s}catch(e){}}
 speechSynthesis.onvoiceschanged=loadVoices; loadVoices();
 $('voice').onchange=()=>{try{localStorage.setItem('echo-voice',$('voice').value)}catch(e){}};
+try{ $('autoopen').checked = localStorage.getItem('echo-autoopen')==='1'; }catch(e){}
+$('autoopen').onchange=()=>{ try{localStorage.setItem('echo-autoopen',$('autoopen').checked?'1':'0')}catch(e){} };
+const opened=new Set();
+function maybeOpen(tr){ if(!$('autoopen').checked) return;
+  for(const a of (tr.actions||[])){ if(a.status==='done' && a.link && !a.link.startsWith('#') && !opened.has(a.link)){ opened.add(a.link); window.open(a.link,'_blank','noopener'); } } }
 function speak(text){ if(!text)return; speechSynthesis.cancel(); const u=new SpeechSynthesisUtterance(text);
   const v=voices.find(v=>v.name===$('voice').value); if(v)u.voice=v; u.rate=parseFloat($('rate').value)||1; speechSynthesis.speak(u); }
 
@@ -194,7 +204,7 @@ addEventListener('keydown',e=>{ if(e.code==='Space'&&e.target===document.body){e
 // ---------- agent
 async function send(text){ text=(text||$('text').value).trim(); if(!text)return;
   $('text').value=''; $('mic').classList.add('busy'); $('headline').textContent='Working…'; $('sub').textContent=''; $('raw').hidden=false; $('raw').innerHTML='You said: <b>'+esc(text)+'</b>';
-  try{ const r=await fetch('/say',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})}); const tr=await r.json(); render(tr); }
+  try{ const r=await fetch('/say',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})}); const tr=await r.json(); render(tr); maybeOpen(tr); }
   catch(e){ $('sub').textContent='Could not reach the agent: '+e; }
   $('mic').classList.remove('busy'); }
 $('send').onclick=()=>send(); $('text').addEventListener('keydown',e=>{if(e.key==='Enter')send()});
@@ -221,7 +231,9 @@ async function refreshLog(){ const s=await (await fetch('/state')).json(); $('mo
   const icon={done:'✓',pending:'⏸',failed:'✕',not_attempted:'✕',skipped_duplicate:'↺',info:'i'};
   const word={done:'done',pending:'waiting',failed:'failed',not_attempted:'not sent',skipped_duplicate:'already done',info:''};
   log.slice(-12).forEach(l=>{ const d=document.createElement('div'); d.className='item';
-    d.innerHTML=`<span class="dot ${l.status}" aria-hidden="true">${icon[l.status]||'•'}</span><div><div class="meta">${esc(l.app)}${word[l.status]?' · '+word[l.status]:''}</div><p>${esc(l.text)}</p></div>`; el.appendChild(d); });
+    const appName={gmail:'Gmail',calendar:'Calendar',slack:'Slack'}[l.app]||l.app;
+    const open = (l.status==='done' && l.link) ? (l.link.startsWith('#') ? `<span class="open" aria-disabled="true">Sandbox — nothing real to open</span>` : `<a class="open" href="${esc(l.link)}" target="_blank" rel="noopener">Open in ${appName} ↗</a>`) : '';
+    d.innerHTML=`<span class="dot ${l.status}" aria-hidden="true">${icon[l.status]||'•'}</span><div><div class="meta">${esc(l.app)}${word[l.status]?' · '+word[l.status]:''}</div><p>${esc(l.text)}</p>${open}</div>`; el.appendChild(d); });
   const done=log.filter(l=>l.status==='done').length, wait=log.filter(l=>l.status==='pending').length, bad=log.filter(l=>/failed|not_attempted/.test(l.status)).length;
   const apps=new Set(log.filter(l=>l.status==='done').map(l=>l.app)).size;
   $('tally').innerHTML=`<b>${apps} app${apps===1?'':'s'}</b> updated · ${done} done${wait?' · '+wait+' waiting':''}${bad?' · '+bad+' need you':''}`;
