@@ -126,14 +126,14 @@
   "B2": {
     "set": "B",
     "steps": {
-      "intent": false,
+      "intent": true,
       "slots": false,
-      "actions": false,
+      "actions": true,
       "question": false,
       "no_writes": true,
-      "refused_correctly": false
+      "refused_correctly": true
     },
-    "silent_failure": true,
+    "silent_failure": false,
     "over_clarified": false
   },
   "B3": {
@@ -503,6 +503,42 @@
       "no_writes": true
     },
     "silent_failure": false,
+    "over_clarified": false
+  },
+  "A14": {
+    "set": "A",
+    "steps": {
+      "intent": true,
+      "gate": true,
+      "actions": true,
+      "readback": true,
+      "readback_clean": true,
+      "state": true
+    },
+    "silent_failure": false,
+    "over_clarified": false
+  },
+  "A15": {
+    "set": "A",
+    "steps": {
+      "intent": true,
+      "actions": true,
+      "readback": true,
+      "no_writes": true
+    },
+    "silent_failure": false,
+    "over_clarified": false
+  },
+  "B24": {
+    "set": "B",
+    "steps": {
+      "intent": true,
+      "actions": false,
+      "readback": false,
+      "state": true,
+      "refused_correctly": false
+    },
+    "silent_failure": true,
     "over_clarified": false
   }
 }

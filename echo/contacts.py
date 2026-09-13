@@ -6,7 +6,8 @@ from difflib import SequenceMatcher
 
 
 def _norm(s: str) -> str:
-    return re.sub(r"[^a-z ]", "", s.lower()).strip()
+    s = re.sub(r"\bdoctor\b", "dr", s.lower())
+    return re.sub(r"\s+", " ", re.sub(r"[^a-z ]", "", s)).strip()
 
 
 class Contacts:
@@ -33,6 +34,21 @@ class Contacts:
             return exact, f"exact alias match '{mention}' → {exact[0]['name']}"
         if len(exact) > 1:
             return exact, f"'{mention}' matches {len(exact)} contacts: " + ", ".join(r["name"] for r in exact)
+        # score by how many distinct name tokens the mention contains ("dr anita patel" → Anita 3, Ravi 1)
+        mtoks = set(m.split())
+        scored = []
+        for row in self.rows:
+            toks = set()
+            for a in self._aliases(row):
+                toks |= set(a.split())
+            hit = len(mtoks & toks)
+            if hit:
+                scored.append((hit, row))
+        if scored:
+            best = max(h for h, _ in scored)
+            top = [r for h, r in scored if h == best]
+            if len(top) == 1 and best >= 2:
+                return top, f"name-part match '{mention}' → {top[0]['name']} ({best} parts)"
         if partial:
             return partial, f"partial match '{mention}' → " + ", ".join(r["name"] for r in partial)
         # homophone / near-miss: John vs Joan vs "Jon"

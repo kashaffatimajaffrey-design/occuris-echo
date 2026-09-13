@@ -1155,6 +1155,94 @@
         ],
         "no_writes": true
       }
+    },
+    {
+      "id": "A14",
+      "set": "A",
+      "transcript": "Lunch with Doctor Anita Patel Friday at 3pm, and email her about it",
+      "expect": {
+        "intent": "MULTI",
+        "gate": "CONFIRM_REQUIRED",
+        "actions": [
+          {
+            "app": "calendar",
+            "op": "create",
+            "status": "done"
+          },
+          {
+            "app": "gmail",
+            "op": "send",
+            "status": "pending"
+          }
+        ],
+        "readback_has": [
+          "lunch",
+          "Dr. Anita Patel",
+          "3 pm"
+        ],
+        "readback_not": [
+          "None"
+        ],
+        "state": {
+          "events": 1,
+          "sent": 0
+        }
+      }
+    },
+    {
+      "id": "A15",
+      "set": "A",
+      "transcript": "I want to book a lunch with friends. Can you look at my week and tell me if I'm free on any day?",
+      "scenario": {
+        "calendar": [
+          {
+            "id": "e1",
+            "title": "Physio",
+            "start": "2026-09-16T15:00",
+            "end": "2026-09-16T16:00"
+          }
+        ]
+      },
+      "expect": {
+        "intent": "QUERY",
+        "actions": [],
+        "readback_has": [
+          "Wednesday has Physio",
+          "Thursday is clear",
+          "Pick a day"
+        ],
+        "no_writes": true
+      }
+    },
+    {
+      "id": "B24",
+      "set": "B",
+      "turns": [
+        "Lunch Friday at 3, also email Patel about it",
+        "Doctor Anita Patel"
+      ],
+      "expect": {
+        "intent": "CLARIFY",
+        "actions": [
+          {
+            "app": "calendar",
+            "op": "create",
+            "status": "done"
+          },
+          {
+            "app": "gmail",
+            "op": "send",
+            "status": "pending"
+          }
+        ],
+        "readback_has": [
+          "Dr. Anita Patel"
+        ],
+        "state": {
+          "events": 1,
+          "sent": 0
+        }
+      }
     }
   ]
 }

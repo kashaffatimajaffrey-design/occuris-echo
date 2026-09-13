@@ -19,7 +19,7 @@ GARBAGE = re.compile(r"\[(static|unintelligible|inaudible|noise)\]", re.I)
 SENSITIVE = re.compile(r"\b(password|passcode|pin|otp|cvv|card number|social security|ssn)\b", re.I)
 INJECTION = re.compile(r"(ignore (all |any )?(prior|previous) instructions|forward (this )?(thread|email) to all|ai assistant:|system:)", re.I)
 
-CLAUSE_SPLIT = re.compile(r",\s*(?:and\s+)?|\s+and then\s+|\s+then\s+|\s+and\s+(?=(?:tell|put|add|email|reply|send|move|remind|text|message|notify|at\s+\d|my\s+(?:sister|brother)|(?:on|for)\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow)|tomorrow|next\s+week))", re.I)
+CLAUSE_SPLIT = re.compile(r"(?<![Dd]r)(?<![Mm]r)(?<![Mm]s)(?<![Mm]rs)(?<![Ss]t)\.\s+|,\s*(?:and\s+)?|\s+and then\s+|\s+then\s+|\s+and\s+(?=(?:tell|put|add|email|reply|send|move|remind|text|message|notify|at\s+\d|my\s+(?:sister|brother)|(?:on|for)\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow)|tomorrow|next\s+week))", re.I)
 
 
 def strip_disfluencies(text: str) -> str:
@@ -112,10 +112,18 @@ def parse_when(text: str, today: datetime) -> tuple[Slot, bool]:
 RENAME = re.compile(r"(?:it'?s\s+)?not\s+(?:a\s+|an\s+|the\s+)?([a-z][a-z ]*?),?\s+(?:it'?s\s+)?(?:supposed to be\s+|meant to be\s+|should be\s+)?(?:a\s+|an\s+|the\s+)?([a-z][a-z ]*?)(?:\s*$|[.,])|\b(?:call it|rename it to|name it|change (?:the )?(?:name|title) to)\s+(?:a\s+|an\s+|the\s+)?([a-z][a-z ]*?)\s*$|\brename\s+(?:the\s+)?([a-z][a-z ]*?)\s+to\s+(?:a\s+|an\s+|the\s+)?([a-z][a-z ]*?)\s*$", re.I)
 
 
+EVENT_NOUNS = r"(lunch|dinner|brunch|breakfast|coffee|meeting|appointment|call|check-?up|dentist|doctor|physio|gym|class|interview|flight|train|party|concert|movie|date|visit|session|lesson|standup|review|catch-?up|luncheon|drinks|workout)"
+
+
 def detect_intent(clause: str) -> Intent | None:
     c = clause.lower()
     if RENAME.search(c): return Intent.RENAME_EVENT
-    if re.search(r"\b(what'?s on|what is on|what do i (have|need)|do i have|did i|have i|is there|am i free|any slots?|any time|when am i free|what times?|available)\b", c) or c.rstrip().endswith("?"):
+    polite = re.match(r"^\s*(?:so\s+)?(?:can|could|would|will)\s+you\s+(?:please\s+)?|^\s*please\s+", c)
+    if polite:
+        c = c[polite.end():]
+    has_verb = re.search(r"\b(reply|respond|email|mail|send|tell|text|message|notify|ping|put|add|schedule|book|move|reschedule|change|rename|delete|remove|remind)\b", c)
+    if re.search(r"\b(what'?s on|what is on|what do i (have|need)|do i have|did i|have i|is there|am i free|any slots?|any time|when am i free|what times?|available|tell me if|let me know if)\b", c) \
+            or (c.rstrip().endswith("?") and not has_verb):
         return Intent.QUERY
     if re.search(r"\b(reply|respond|write back)\b", c): return Intent.REPLY_EMAIL
     if re.search(r"\b(email|mail)\b", c): return Intent.SEND_EMAIL
@@ -126,10 +134,16 @@ def detect_intent(clause: str) -> Intent | None:
         return Intent.CREATE_EVENT
     if re.search(r"\b(tell|text|message|notify|let .* know|ping)\b", c): return Intent.NOTIFY
     if re.search(r"\b(remind)\b", c): return Intent.CREATE_EVENT
+    if re.search(r"\b(want to|wanna|i'?d like to|let'?s|i need to)\s+(have|book|do|schedule|go for|grab|get)\b", c) and re.search(r"\b" + EVENT_NOUNS + r"\b", c):
+        return Intent.CREATE_EVENT
+    # "Lunch with Dr Patel Friday at 3" — an event noun plus a time, no verb: that is an event
+    if re.search(r"\b" + EVENT_NOUNS + r"\b", c) and re.search(r"\d|monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow|noon", c) \
+            and not re.search(r"\b(reply|email|mail|tell|text|message|send|free|slots?|available|do i have|what)\b", c):
+        return Intent.CREATE_EVENT
     return None
 
 
-RECIP = re.compile(r"\b(?:reply to|respond to|email|mail|tell|text|message|notify|ping|send (?:it )?to|let)\s+((?:dr\.?\s+)?[a-z][a-z.]*(?:\s+[a-z][a-z.]*)?)", re.I)
+RECIP = re.compile(r"\b(?:reply to|respond to|email|mail|tell|text|message|notify|ping|send|let)\s+(?:(?:it|this|that|these|the details|the invite)\s+to\s+)?(?:to\s+)?((?:dr\.?\s+|doctor\s+)?[a-z][a-z.]*(?:\s+[a-z][a-z.]*)?)", re.I)
 MSG_SAY = re.compile(r"\b(?:that|saying|say|:)\s+(.+)$", re.I)
 
 
@@ -201,6 +215,10 @@ def extract_title(clause: str) -> Slot:
         return Slot(m.group(1).strip(), Source.deterministic, 0.85, "verb X to")
     m = re.match(r"^\s*(?:also\s+)?(?:a\s+|an\s+|the\s+)?([a-z]+(?:\s+with\s+[a-z ]+?)?)\s+(?:at|on|from)\s+\d", c)
     if m: return Slot(m.group(1).strip(), Source.deterministic, 0.75, "noun before time")
+    m = re.search(r"\b" + EVENT_NOUNS + r"(?:\s+with\s+(?:dr\.?\s+|doctor\s+)?[a-z]+(?:\s+[a-z]+)?)?", c)
+    if m:
+        t = re.sub(r"\b(?:at|on)\s.*$", "", m.group(0)).strip()
+        return Slot(t, Source.deterministic, 0.75, "event noun")
     return Slot(None, Source.none)
 
 
@@ -209,6 +227,17 @@ def split_clauses(text: str) -> list[str]:
     if m:
         verb, a, b, msg = m.groups()
         text = text[:m.start()] + f"{verb} {a} {msg}, {verb} {b} {msg}"
+    # ASR writes a period at every pause: "…with a doctor. Doctor. Patel. And, umm. I wanna…"
+    raw = [p.strip(" ,.") for p in re.split(r"(?<=[a-z0-9])(?<![Dd]r)(?<![Mm]r)(?<![Mm]s)(?<![Mm]rs)(?<![Ss]t)\.\s+(?=[A-Za-z])", text) if p.strip(" ,.")]
+    joined: list[str] = []
+    for frag in raw:
+        words = frag.split()
+        tiny = len(words) <= 2 and not re.search(r"\d", frag) and not detect_intent(frag)
+        if joined and (tiny or re.match(r"^(and|so|also|then)\b", frag, re.I)):
+            joined[-1] = joined[-1] + " " + re.sub(r"^(and|so|also|then)\s+", "", frag, flags=re.I)
+        else:
+            joined.append(frag)
+    text = ". ".join(joined)
     parts = [p.strip(" ,.") for p in CLAUSE_SPLIT.split(text) if p and p.strip(" ,.")]
     # "at 7:00 PM I need to go for dinner" — clause starting with a time still belongs to a new event
     return parts or [text]
@@ -268,6 +297,14 @@ def parse(transcript: str, contacts: Contacts, today: datetime, ablate: bool = F
     carry_when: Slot | None = None
     for cl in clauses:
         intent = detect_intent(cl)
+        if intent is None and subs and subs[-1].intent == Intent.CREATE_EVENT and not subs[-1].datetime.value \
+                and re.search(r"\b(do it|make it|have it|it|that)\b", cl.lower()) and re.search(r"\d|monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow|noon", cl.lower()):
+            when, amb = parse_when(cl, today)
+            if when.value:
+                subs[-1].datetime = when
+                subs[-1].question = None if not amb else subs[-1].question
+                carry_when = when
+            continue
         if intent is None:
             # a bare "at 7pm dinner with friends" style clause after a CREATE_EVENT
             if subs and subs[-1].intent == Intent.CREATE_EVENT and re.search(r"\d", cl):
@@ -282,6 +319,9 @@ def parse(transcript: str, contacts: Contacts, today: datetime, ablate: bool = F
         si = SubIntent(intent=intent, clause=cl)
         if intent in (Intent.REPLY_EMAIL, Intent.SEND_EMAIL, Intent.NOTIFY):
             slot, cands, mention = extract_recipient(cl, contacts)
+            if (not slot.value) and mention and mention.lower().split()[0] in ("him", "her", "them") and carry_recipient and carry_recipient.value:
+                slot = Slot(carry_recipient.value, Source.deterministic, 0.85, f"'{mention}' → the person just mentioned")
+                cands = [{"name": carry_recipient.value}]
             si.recipient = slot
             if not slot.value:
                 if len(cands) > 1:
@@ -312,6 +352,11 @@ def parse(transcript: str, contacts: Contacts, today: datetime, ablate: bool = F
                 si.question = "What should I call it?"
         elif intent in (Intent.CREATE_EVENT, Intent.UPDATE_EVENT):
             si.title = extract_title(cl)
+            wm = re.search(r"\bwith\s+((?:dr\.?\s+|doctor\s+)?[a-z]+(?:\s+[a-z]+)?)", cl, re.I)
+            if wm:
+                wc, _ = contacts.resolve(wm.group(1))
+                if len(wc) == 1:
+                    carry_recipient = Slot(wc[0]["name"], Source.deterministic, 0.8, "mentioned with the event")
             when, amb = parse_when(cl, today)
             si.datetime = when
             if amb:

@@ -58,6 +58,10 @@ class Agent:
             self._ctx = None
             tr = Trace(run_id, transcript, transcript, Intent.REFUSE, [], Gate.AUTO_OK, [], "Cancelled. Nothing was sent.")
             self.traces.append(tr); return tr
+        if not pend and self._ctx and self._ctx.get("kind") in ("when", "who", "title", "message") and (YES.match(transcript) or NO.match(transcript)) and len(transcript.split()) <= 3:
+            q = self._ctx["asker"].question
+            tr = Trace(run_id, transcript, transcript, Intent.CLARIFY, [], Gate.AUTO_OK, [], f"I need the answer itself, not a yes or no — {q}", question=q)
+            self.traces.append(tr); return tr
         if not pend and not self._ctx and (YES.match(transcript) or NO.match(transcript)) and len(transcript.split()) <= 3:
             tr = Trace(run_id, transcript, transcript, Intent.QUERY, [], Gate.AUTO_OK, [],
                        "Nothing is waiting for a yes or no right now." if YES.match(transcript) else "Okay — nothing to cancel.")
@@ -92,6 +96,11 @@ class Agent:
                 subs = self._ctx["subs"]
                 meta = {"cleaned": self._ctx["text"] + " — " + transcript, "corrections": []}
             else:
+                cands, _ = self.contacts.resolve(transcript.strip(" ."))
+                if len(cands) == 1 and self._ctx["kind"] != "who":
+                    needy = next((x for x in self._ctx["subs"] if x.intent in (Intent.REPLY_EMAIL, Intent.SEND_EMAIL, Intent.NOTIFY) and not x.recipient.value), None)
+                    if needy:
+                        self._ctx["kind"] = "who"; self._ctx["asker"] = needy
                 merged = self._merge_answer(transcript)
                 if merged:
                     transcript = merged
@@ -128,7 +137,16 @@ class Agent:
         if self.ablate:
             self._ablate(subs)
 
-        # 4. queries
+        # 4. queries — including "I want to book lunch… am I free this week?": answer, keep the lunch open
+        if any(s.intent == Intent.QUERY for s in subs) and any(s.intent == Intent.CREATE_EVENT and not s.datetime.value for s in subs):
+            qsub = next(s for s in subs if s.intent == Intent.QUERY)
+            csub = next(s for s in subs if s.intent == Intent.CREATE_EVENT)
+            rb = self._answer_query(qsub, transcript)
+            what = csub.title.value or "that"
+            csub.question = f"When should I put {what} — what day and time?"
+            self._remember_question(cleaned, [csub])
+            rb = rb.rstrip(".") + f". Pick a day and time and I'll add {what}."
+            return self._finish(Trace(run_id, transcript, cleaned, Intent.QUERY, subs, Gate.AUTO_OK, [], rb, question=csub.question, corrections=corrections), pend)
         if all(s.intent == Intent.QUERY for s in subs):
             rb = self._answer_query(subs[0], transcript)
             return self._finish(Trace(run_id, transcript, cleaned, Intent.QUERY, subs, Gate.AUTO_OK, [], rb, corrections=corrections), pend)
@@ -176,6 +194,17 @@ class Agent:
                                   f"Say “same” and I'll update it with the new details, or “different” to add another.")
                     s.conflict = sim["id"]  # remembered for the answer
                     self._remember_question(cleaned, subs)
+        # SEND_EMAIL with no body: compose from the event in the same breath (the user's own words), else ask
+        for s in subs:
+            if s.intent in (Intent.SEND_EMAIL, Intent.REPLY_EMAIL) and not s.message.value and not s.question:
+                ev = next((x for x in subs if x.intent == Intent.CREATE_EVENT and x.datetime.value), None)
+                if ev:
+                    s.message = Slot(f"{(ev.title.value or 'Meeting').capitalize()} — {speak_when(ev.datetime.value)}. Does that work for you?",
+                                     Source.deterministic, 0.75, "composed from the event you asked me to add")
+                elif s.datetime.value:
+                    s.message = Slot(f"{speak_when(s.datetime.value)} works for me.", Source.deterministic, 0.75, "from the time you said")
+                else:
+                    s.question = "What should the email say?"
         # share a message across NOTIFY siblings ("tell A and B I'll be late")
         msgs = [s.message.value for s in subs if s.message.value]
         whens = [s.datetime.value for s in subs if s.datetime.value]
@@ -238,6 +267,7 @@ class Agent:
         gate = self._gate(subs)
         top = Intent.MULTI if len(subs) > 1 else subs[0].intent
 
+        subs = [s for s in subs if s.intent != Intent.QUERY] or subs
         if gate == Gate.AUTO_OK:
             actions = [self._do(s, run_id) for s in subs]
             rb = readback_for(actions, subs)
@@ -467,7 +497,7 @@ class Agent:
             if not done:
                 return "No — I haven't sent anything yet."
             return "Yes — " + "; ".join(r.get("readback", r.get("op", "")) for r in done[-3:])
-        if "this week" in t or "need to do" in t:
+        if re.search(r"\b(need to do|to ?do|what do i (have|need) to|anything (i )?(should|need)|my inbox|emails?)\b", t):
             return self._week_digest()
         day = (s.datetime.value or self.today.isoformat())[:10]
         day_words = speak_when(day + "T00:00", day_only=True)
@@ -479,8 +509,11 @@ class Agent:
             except Exception:  # noqa: BLE001 — malformed event must not crash the answer
                 continue
         events.sort()
+        # whole week?
+        if re.search(r"\b(this week|whole week|the week|any day|which day|what day)\b", t):
+            return self._week_availability(t)
         # free-slot question?
-        if re.search(r"\b(free|slots?|available|open|when can i|any time)\b", t):
+        if re.search(r"\b(free|slots?|available|open|when can i|any time|good time)\b", t):
             return self._free_slots(day, day_words, events, t)
         if not events:
             return f"Nothing on your calendar {day_words} — it's clear."
@@ -489,6 +522,28 @@ class Agent:
 
     EVENING = re.compile(r"\b(concert|dinner|drinks?|movie|film|show|party|gig|theatre|theater|night|evening|late)\b")
     DAYTIME = re.compile(r"\b(coffee|brunch|breakfast|lunch|walk|gym|run|appointment|meeting|errand|shopping|morning|afternoon|daytime|class)\b")
+
+    def _week_availability(self, t: str) -> str:
+        """Busy/free summary for the next 7 days, one short clause per day."""
+        from datetime import timedelta
+        out = []
+        for i in range(7):
+            d = (self.today + timedelta(days=i)).date().isoformat()
+            evs = []
+            for e in self.p.calendar_list(d):
+                try:
+                    evs.append((datetime.fromisoformat(e["start"]), e["title"]))
+                except Exception:  # noqa: BLE001
+                    continue
+            name = datetime.fromisoformat(d + "T00:00").strftime("%A")
+            if not evs:
+                out.append(f"{name} is clear")
+            else:
+                out.append(f"{name} has " + ", ".join(f"{ti} at {speak_when(st.isoformat(), time_only=True)}" for st, ti in sorted(evs)))
+        lead = "This week: " + "; ".join(out) + "."
+        if re.search(r"\b(lunch|coffee|brunch|breakfast)\b", t):
+            lead += " For lunch, the clear days around midday are the easy ones — say a day and time and I'll add it."
+        return lead
 
     def _free_slots(self, day: str, day_words: str, events, t: str) -> str:
         """Free windows of an hour or more between 8am and 11pm, led by the half of the day that suits the activity."""
