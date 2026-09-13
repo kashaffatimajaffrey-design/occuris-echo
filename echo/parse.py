@@ -1,0 +1,249 @@
+"""Deterministic parser. Rules first; the model is only consulted for what rules can't settle.
+
+Pipeline: clean (disfluencies, corrections) → detect refusal/garbage → split into clauses →
+per clause: intent, recipient, datetime, message/title → return SubIntents (+ clarify questions)."""
+from __future__ import annotations
+
+import re
+from datetime import datetime, timedelta
+
+import dateparser
+
+from .contacts import Contacts
+from .models import Intent, Slot, Source, SubIntent
+
+DISFLUENCIES = r"\b(umm+|uh+|um+|er+|erm+|hmm+|like|you know|basically|just|kind of|sort of)\b"
+CORRECTION = re.compile(r"\b(not\s+\S+\s*)?(actually|i mean|sorry|no wait|scratch that|correction)\b", re.I)
+RETRACTION = re.compile(r"\b(never\s*mind|nevermind|forget it|cancel that|scratch that|don'?t bother)\b", re.I)
+GARBAGE = re.compile(r"\[(static|unintelligible|inaudible|noise)\]", re.I)
+SENSITIVE = re.compile(r"\b(password|passcode|pin|otp|cvv|card number|social security|ssn)\b", re.I)
+INJECTION = re.compile(r"(ignore (all |any )?(prior|previous) instructions|forward (this )?(thread|email) to all|ai assistant:|system:)", re.I)
+
+CLAUSE_SPLIT = re.compile(r",\s*(?:and\s+)?|\s+and then\s+|\s+then\s+|\s+and\s+(?=(?:tell|put|add|email|reply|send|move|remind|text|message|notify|at\s+\d|my\s+(?:sister|brother)))", re.I)
+
+
+def strip_disfluencies(text: str) -> str:
+    t = re.sub(DISFLUENCIES, " ", text, flags=re.I)
+    t = re.sub(r"\s+", " ", t).strip(" ,.")
+    return t
+
+
+def apply_corrections(text: str) -> tuple[str, list[str]]:
+    """'at 7 not 7 actually at 2' → 'at 2'. Last value wins after a correction marker."""
+    notes = []
+    # pattern: <X> not <X> actually <Y>  |  <X> actually <Y>  |  <X> I mean <Y>
+    pat = re.compile(r"(?:at\s+)?(?:around\s+)?(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\s+(?:not\s+\S+\s+)?(?:actually|i mean|sorry|no wait)\s+(?:at\s+)?(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)", re.I)
+    def repl(m):
+        notes.append(f"corrected '{m.group(1).strip()}' → '{m.group(2).strip()}'")
+        return f"at {m.group(2)}"
+    t = pat.sub(repl, text)
+    return t, notes
+
+
+def has_retraction(text: str) -> bool:
+    return bool(RETRACTION.search(text))
+
+
+def is_garbage(text: str) -> bool:
+    words = [w for w in re.sub(GARBAGE, " ", text).split() if w.isalpha()]
+    return bool(GARBAGE.search(text)) and len(words) < 4
+
+
+# ---------------------------------------------------------------- datetime
+WEEKDAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+
+
+def parse_when(text: str, today: datetime) -> tuple[Slot, bool]:
+    """Returns (slot, ambiguous_next_weekday). 'next Thursday' said on a Thursday is ambiguous."""
+    t = text.lower()
+    ambiguous = False
+    m = re.search(r"\bnext\s+(" + "|".join(WEEKDAYS) + r")\b", t)
+    if m and WEEKDAYS[today.weekday()] == m.group(1):
+        ambiguous = True
+    # time
+    tm = re.search(r"\b(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm|a\.m\.|p\.m\.)?\b(?!\s*(?:minutes|mins|min))", t)
+    hour = minute = None
+    if tm:
+        hour = int(tm.group(1)); minute = int(tm.group(2) or 0)
+        ap = (tm.group(3) or "").replace(".", "")
+        if ap == "pm" and hour < 12: hour += 12
+        if ap == "am" and hour == 12: hour = 0
+        if not ap and 1 <= hour <= 7: hour += 12  # "at 2" → 14:00 (working-hours heuristic, tagged below)
+    if "noon" in t: hour, minute = 12, 0
+    # day
+    day = None
+    if "tomorrow" in t: day = today + timedelta(days=1)
+    elif "today" in t or "tonight" in t: day = today
+    else:
+        wd = re.search(r"\b(" + "|".join(WEEKDAYS) + r")\b", t)
+        if wd:
+            target = WEEKDAYS.index(wd.group(1))
+            delta = (target - today.weekday()) % 7
+            if delta == 0 and not m: delta = 0
+            if m: delta = 7 if delta == 0 else delta
+            day = today + timedelta(days=delta)
+    no_day = False
+    if day is None and hour is not None:
+        day = today; no_day = True  # time with no day ⇒ today, flagged
+    if day is None:
+        # last resort: dateparser
+        dp = dateparser.parse(t, settings={"RELATIVE_BASE": today, "PREFER_DATES_FROM": "future"})
+        if dp and re.search(r"\d|monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow", t):
+            return Slot(dp.replace(second=0, microsecond=0).isoformat(timespec="minutes"), Source.deterministic, 0.6, "dateparser"), ambiguous
+        return Slot(None, Source.none), ambiguous
+    dt = day.replace(hour=hour or 0, minute=minute or 0, second=0, microsecond=0)
+    conf = 0.95 if (hour is not None and tm and tm.group(3)) else 0.8
+    ev = ("no-day; " if no_day else "") + f"weekday/time rule on '{text[:40]}'"
+    return Slot(dt.isoformat(timespec="minutes"), Source.deterministic, conf, ev), ambiguous
+
+
+# ---------------------------------------------------------------- intents
+def detect_intent(clause: str) -> Intent | None:
+    c = clause.lower()
+    if re.search(r"\b(what'?s on|what is on|what do i (have|need)|did i|have i|is there)\b", c) or c.rstrip().endswith("?"):
+        return Intent.QUERY
+    if re.search(r"\b(reply|respond|write back)\b", c): return Intent.REPLY_EMAIL
+    if re.search(r"\b(email|mail)\b", c): return Intent.SEND_EMAIL
+    if re.search(r"\bsend\b", c): return Intent.SEND_EMAIL
+    if re.search(r"\b(move|reschedule|push|shift)\b", c): return Intent.UPDATE_EVENT
+    if re.search(r"\b(put|add|schedule|book|calendar)\b", c) or re.search(r"\bi have (a|an|the)\b", c) or re.search(r"\bi need to go\b", c):
+        return Intent.CREATE_EVENT
+    if re.search(r"\b(tell|text|message|notify|let .* know|ping)\b", c): return Intent.NOTIFY
+    if re.search(r"\b(remind)\b", c): return Intent.CREATE_EVENT
+    return None
+
+
+RECIP = re.compile(r"\b(?:reply to|respond to|email|mail|tell|text|message|notify|ping|send (?:it )?to|let)\s+((?:dr\.?\s+)?[a-z][a-z.]*(?:\s+[a-z][a-z.]*)?)", re.I)
+MSG_SAY = re.compile(r"\b(?:that|saying|say|:)\s+(.+)$", re.I)
+
+
+def extract_recipient(clause: str, contacts: Contacts) -> tuple[Slot, list[dict], str]:
+    m = RECIP.search(clause)
+    if not m:
+        return Slot(None, Source.none), [], "no recipient phrase"
+    mention = m.group(1)
+    rel = re.match(r"my\s+(sister|brother|mum|mom|dad|wife|husband|partner)\b", mention, re.I)
+    if rel:
+        mention = "my " + rel.group(1).lower()
+    else:
+        # trim trailing verbs/that-clauses: "Patel that Thursday" → "Patel"
+        mention = re.split(r"\b(that|saying|say|about|i'?ll|i am|i'm|my|to)\b", mention, maxsplit=1)[0].strip(" .:")
+    cands, ev = contacts.resolve(mention)
+    if len(cands) == 1:
+        return Slot(cands[0]["name"], Source.deterministic, 0.95, ev), cands, mention
+    return Slot(None, Source.none), cands, mention
+
+
+def extract_message(clause: str) -> Slot:
+    m = MSG_SAY.search(clause)
+    if not m:
+        return Slot(None, Source.none)
+    msg = m.group(1).strip(" .")
+    msg = re.sub(r"^(that|saying|say)\s+", "", msg, flags=re.I)
+    return Slot(msg, Source.deterministic, 0.9, "after say/that/colon")
+
+
+def extract_title(clause: str) -> Slot:
+    c = clause.lower()
+    m = re.search(r"\b(?:put|add|schedule|book)\s+(?:the\s+|a\s+|an\s+)?(.+?)\s+(?:on|to|in)\s+(?:my\s+)?calendar", c)
+    if m and m.group(1).strip() not in ("it", "that", "this", "them"):
+        return Slot(m.group(1).strip(), Source.deterministic, 0.9, "put X on calendar")
+    m = re.search(r"\bi have (?:a|an|the)\s+([a-z ]+?)\s+(?:at|on|with)\b", c) or re.search(r"\bi have (?:a|an|the)\s+([a-z]+)", c)
+    if m: return Slot(m.group(1).strip(), Source.deterministic, 0.85, "I have a X")
+    m = re.search(r"\b(?:add|schedule|book)\s+(.+?)\s+(?:on|at|for)\b", c)
+    if m: return Slot(m.group(1).strip(), Source.deterministic, 0.8, "add X at")
+    m = re.search(r"\b(?:go for|go to)\s+(.+?)(?:\s+with\b|$)", c)
+    if m: return Slot(m.group(1).strip(), Source.deterministic, 0.8, "go for X")
+    m = re.search(r"\b(?:move|reschedule)\s+(?:the\s+)?([a-z ]+?)\s+to\b", c)
+    if m: return Slot(m.group(1).strip(), Source.deterministic, 0.9, "move X to")
+    m = re.match(r"^\s*(?:also\s+)?(?:a\s+|an\s+|the\s+)?([a-z]+(?:\s+with\s+[a-z ]+?)?)\s+(?:at|on|from)\s+\d", c)
+    if m: return Slot(m.group(1).strip(), Source.deterministic, 0.75, "noun before time")
+    return Slot(None, Source.none)
+
+
+def split_clauses(text: str) -> list[str]:
+    m = re.search(r"\b(tell|text|message|notify)\s+((?:my\s+)?\w+)\s+and\s+((?:my\s+)?\w+)\s+(.+)$", text, re.I)
+    if m:
+        verb, a, b, msg = m.groups()
+        text = text[:m.start()] + f"{verb} {a} {msg}, {verb} {b} {msg}"
+    parts = [p.strip(" ,.") for p in CLAUSE_SPLIT.split(text) if p and p.strip(" ,.")]
+    # "at 7:00 PM I need to go for dinner" — clause starting with a time still belongs to a new event
+    return parts or [text]
+
+
+def parse(transcript: str, contacts: Contacts, today: datetime) -> tuple[list[SubIntent], dict]:
+    """Returns subintents and a meta dict: cleaned, corrections, retraction, garbage, sensitive."""
+    meta = {"raw": transcript}
+    if is_garbage(transcript):
+        meta.update(cleaned=transcript, garbage=True); return [], meta
+    stripped = strip_disfluencies(transcript)
+    cleaned, notes = apply_corrections(stripped)
+    meta.update(cleaned=cleaned, corrections=notes, retraction=has_retraction(transcript),
+                sensitive=bool(SENSITIVE.search(transcript)))
+    if meta["retraction"]:
+        return [], meta
+
+    subs: list[SubIntent] = []
+    clauses = split_clauses(cleaned)
+    carry_recipient: Slot | None = None
+    carry_when: Slot | None = None
+    for cl in clauses:
+        intent = detect_intent(cl)
+        if intent is None:
+            # a bare "at 7pm dinner with friends" style clause after a CREATE_EVENT
+            if subs and subs[-1].intent == Intent.CREATE_EVENT and re.search(r"\d", cl):
+                intent = Intent.CREATE_EVENT
+            elif subs and re.search(r"\b(it|that)\b", cl) and re.search(r"calendar", cl):
+                intent = Intent.CREATE_EVENT
+            else:
+                continue
+        si = SubIntent(intent=intent)
+        if intent in (Intent.REPLY_EMAIL, Intent.SEND_EMAIL, Intent.NOTIFY):
+            slot, cands, mention = extract_recipient(cl, contacts)
+            si.recipient = slot
+            if not slot.value:
+                if len(cands) > 1:
+                    si.question = f"Which one — {' or '.join(c['name'] for c in cands)}?"
+                elif mention:
+                    si.question = f"I don't have a contact called {mention}. Who do you mean?"
+                else:
+                    si.question = "Who should I send that to?"
+            si.message = extract_message(cl)
+            if intent == Intent.NOTIFY:
+                si.channel = Slot("slack", Source.deterministic, 0.9, "notify ⇒ slack")
+                if not si.message.value:
+                    # "tell my sister I'll be there at 2" — message is everything after the recipient phrase
+                    rest = re.sub(r"^\s*(?:tell|text|message|notify|ping)\s+" + re.escape(mention) + r"\s*", "", cl, flags=re.I).strip(" ,.")
+                    if rest and rest.lower() != cl.lower():
+                        si.message = Slot(rest, Source.deterministic, 0.8, "after recipient")
+            if "[unintelligible]" in transcript.lower() and si.message.value and "unintelligible" in si.message.value.lower():
+                si.message = Slot(None, Source.none)
+                si.question = si.question or "What should the message say?"
+            when, amb = parse_when(cl, today)
+            si.datetime = when
+            carry_recipient = si.recipient
+        elif intent in (Intent.CREATE_EVENT, Intent.UPDATE_EVENT):
+            si.title = extract_title(cl)
+            when, amb = parse_when(cl, today)
+            si.datetime = when
+            if amb:
+                si.question = "This Thursday or next? Say the date — the 17th or the 24th."
+            elif not when.value:
+                # "add it to my calendar" — inherit datetime from an earlier clause
+                if carry_when and carry_when.value:
+                    si.datetime = Slot(carry_when.value, Source.deterministic, 0.8, "inherited from earlier clause")
+                else:
+                    si.question = "When should I put that — what day and time?"
+            if not si.title.value:
+                who = carry_recipient.value if (carry_recipient and carry_recipient.value) else None
+                si.title = Slot(f"Follow-up — {who}" if who else "Meeting",
+                                Source.deterministic if who else Source.model, 0.6, "inferred title")
+        elif intent == Intent.QUERY:
+            when, _ = parse_when(cl, today)
+            si.datetime = when
+        if si.datetime.value:
+            carry_when = si.datetime
+        subs.append(si)
+    if not subs:
+        meta["unparsed"] = True
+    return subs, meta

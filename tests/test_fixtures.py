@@ -24,6 +24,7 @@ def _norm_dt(v):
 
 def run_case(case) -> tuple[Agent, Twins, list]:
     twins = Twins(case.get("scenario"))
+    twins.baseline = twins.snapshot()
     agent = Agent(twins, use_model=False, ablate=ABLATE)
     traces = []
     for t in case.get("turns") or [case["transcript"]]:
@@ -54,7 +55,8 @@ def test_case(case):
         for t in case["turns"]:
             agent.handle(t)
         after = twins.snapshot()
-        steps["idempotent_rerun"] = before == after
+        # the ledger is an audit log and is allowed to grow; app state must not
+        steps["idempotent_rerun"] = all(before[k] == after[k] for k in ("sent", "events", "slack"))
 
     last = traces[-1]
     silent = False
@@ -126,11 +128,11 @@ def test_case(case):
 
     # --- state
     if exp.get("no_writes"):
-        snap = twins.snapshot()
-        steps["no_writes"] = snap["sent"] == 0 and snap["events"] == 0 and snap["slack"] == 0
+        snap, base = twins.snapshot(), twins.baseline
+        steps["no_writes"] = all(snap[k] == base[k] for k in ("sent", "events", "slack"))
     if "state" in exp:
-        snap = twins.snapshot()
-        steps["state"] = all(snap[k] == v for k, v in exp["state"].items())
+        snap, base = twins.snapshot(), twins.baseline
+        steps["state"] = all(snap[k] - base[k] == v for k, v in exp["state"].items())
         # confident-and-wrong: agent claimed done but state disagrees
         if any(a.status.value == "done" for a in last.actions) and not steps["state"]:
             silent = True
