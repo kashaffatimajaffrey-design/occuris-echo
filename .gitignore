@@ -1,0 +1,11 @@
+.env
+credentials.json
+token.json
+__pycache__/
+.pytest_cache/
+*.pyc
+.venv/
+node_modules/
+PLAYBOOK.pdf
+dryrun/
+*.png
