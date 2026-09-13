@@ -63,7 +63,8 @@ def readback_for(actions: list[Action], subs: list[SubIntent], confirm: bool = F
             else:
                 parts.append(f"I already sent that to {_who(s)} — not sending it again. Say “send another” if you want a second one")
         elif a.status == Status.failed:
-            parts.append(f"{a.app.capitalize()} failed for {_who(s) or s.title.value or 'that'} — {a.detail}. Nothing went out there")
+            target = _who(s) if s.recipient.value else (s.title.value or "that")
+            parts.append(f"{a.app.capitalize()} failed for {target} — {a.detail}")
         elif a.status == Status.not_attempted:
             parts.append(f"I couldn't reach {_who(s)} — {a.detail or 'no channel on file'}. Nothing was sent to them")
     text = ". ".join(p.rstrip(".") for p in parts if p)

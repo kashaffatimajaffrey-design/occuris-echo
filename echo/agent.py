@@ -104,7 +104,7 @@ class Agent:
             if self._ctx["kind"] == "title":
                 asker = self._ctx["asker"]
                 given = next((x.title.value for x in subs if x.intent == Intent.RENAME_EVENT and x.title.value), None)
-                asker.title = Slot(given or _clean_title_answer(transcript), Source.deterministic, 0.9, "user named it when asked")
+                asker.title = Slot(_clean_title_answer(given or transcript), Source.deterministic, 0.9, "user named it when asked")
                 asker.question = None; self._answered = True
                 subs = [x for x in self._ctx["subs"] if x.intent != Intent.QUERY] or self._ctx["subs"]
                 meta = {"cleaned": self._ctx["text"] + " — " + transcript, "corrections": []}
@@ -502,7 +502,8 @@ class Agent:
                 time.sleep(0.01)
         why = {404: "I couldn't find that", 429: "the service is rate-limiting me", 400: "the request was rejected"}.get(
             last_err.code if last_err else 0, f"{app} returned an error")
-        a = Action(app, op, key, Status.failed, detail=f"{why} — nothing was changed there", latency_ms=int((time.time() - t0) * 1000))
+        extra = str(last_err).split(" ", 2)[2] if last_err and len(str(last_err).split(" ", 2)) > 2 else ""
+        a = Action(app, op, key, Status.failed, detail=f"{extra or why} — nothing was changed", latency_ms=int((time.time() - t0) * 1000))
         self.p.ledger_append({"ts": _now(), "run_id": run_id, "intent": s.intent.value, "app": app, "op": op, "idempotency_key": key,
                               "status": "failed", "evidence": a.detail, "recipient": s.recipient.value, "title": s.title.value})
         return a
@@ -547,7 +548,7 @@ class Agent:
                 return f"Updated “{ev['title']}” — " + (", ".join(changed) if changed else "nothing needed changing") + ". No duplicate added"
             ev = self.p.calendar_find(s.title.value or "")
             if not ev:
-                raise ProviderError("calendar", 404, "event not found")
+                raise ProviderError("calendar", 404, f"no event called “{s.title.value or '?'}” on your calendar")
             self.p.calendar_update(ev["id"], s.datetime.value)
             return f"Moved “{ev['title']}” to {speak_when(s.datetime.value)}"
         raise ProviderError(app, 400, "unsupported action")
@@ -771,7 +772,8 @@ def _clean_title_answer(text: str) -> str:
     """'Call it spade. Spa day' → 'spa day'. Last version wins; leading 'call it' etc. stripped."""
     parts = [p.strip() for p in re.split(r"[.,;]|\b(?:actually|i mean|sorry|no wait|no)\b", text, flags=re.I) if p and p.strip()]
     t = parts[-1] if parts else text
-    t = re.sub(r"^(?:call it|name it|title it|make it|it'?s|its|put|just)\s+", "", t, flags=re.I).strip(" .")
+    t = re.sub(r"^(?:just\s+)?(?:call it|call at|call the|name it|title it|make it|it'?s|its|put|just)\s+", "", t, flags=re.I).strip(" .")
+    t = re.sub(r"^(?:a|an|the)\s+", "", t, flags=re.I).strip(" .")
     return t or text.strip(" .")
 
 

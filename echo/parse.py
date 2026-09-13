@@ -19,7 +19,7 @@ GARBAGE = re.compile(r"\[(static|unintelligible|inaudible|noise)\]", re.I)
 SENSITIVE = re.compile(r"\b(password|passcode|pin|otp|cvv|card number|social security|ssn)\b", re.I)
 INJECTION = re.compile(r"(ignore (all |any )?(prior|previous) instructions|forward (this )?(thread|email) to all|ai assistant:|system:)", re.I)
 
-CLAUSE_SPLIT = re.compile(r"(?<![Dd]r)(?<![Mm]r)(?<![Mm]s)(?<![Mm]rs)(?<![Ss]t)\.\s+(?!\d{1,2}(?::\d{2})?\s*(?:am|pm)\b)|,\s*(?:and\s+)?(?!\d{1,2}(?::\d{2})?\s*(?:am|pm)\b)|\s+and then\s+|\s+then\s+|\s+and\s+(?=(?:tell|put|add|email|reply|send|move|remind|text|message|notify|at\s+\d|my\s+(?:sister|brother)|(?:on|for)\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow)|tomorrow|next\s+week))", re.I)
+CLAUSE_SPLIT = re.compile(r"(?<![Dd]r)(?<![Mm]r)(?<![Mm]s)(?<![Mm]rs)(?<![Ss]t)\.\s+(?!\d{1,2}(?::\d{2})?\s*(?:am|pm)\b)|,\s*(?:and\s+)?(?!\d{1,2}(?::\d{2})?\s*(?:am|pm)\b)|\?\s+|\s+and then\s+|\s+then\s+|\s+and\s+(?:also\s+|please\s+)?(?=(?:tell|put|add|email|reply|send|move|remind|text|message|notify|at\s+\d|my\s+(?:sister|brother)|(?:on|for)\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow)|tomorrow|next\s+week))", re.I)
 
 
 def strip_disfluencies(text: str) -> str:
@@ -293,7 +293,9 @@ def parse(transcript: str, contacts: Contacts, today: datetime, ablate: bool = F
             si.title = Slot(None, Source.none)
             return [si], meta
     # "call it spade. spa day" — a rename where the mic heard a false start: the last segment is the name
-    cm = re.match(r"^\s*(?:call it|name it|title it|rename it to|rename it)\s+(.+)$", lc)
+    cm = re.match(r"^\s*(?:no,?\s+)?(?:just\s+)?(?:call it|call at|name it|title it|rename it to|rename it|change it to|change that to|make it)\s+(?:a\s+|an\s+|the\s+)?(.+?)(?:\s+instead of\s+.+)?$", lc)
+    if cm and re.search(r"\d|\b(am|pm|monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow)\b", cm.group(1)):
+        cm = None   # "change it to 4pm" is a time change, not a rename
     if cm and not RENAME.search(lc):
         last = [x.strip() for x in re.split(r"[.,;]", cm.group(1)) if x.strip()]
         si = SubIntent(intent=Intent.RENAME_EVENT, clause=cleaned)
@@ -358,6 +360,9 @@ def parse(transcript: str, contacts: Contacts, today: datetime, ablate: bool = F
     carry_recipient: Slot | None = None
     carry_when: Slot | None = None
     for cl in clauses:
+        # word numbers → digits up front so fragment checks ("at nine AM") see a time
+        cl = re.sub(r"\b(at|on|around|by|about)\s+(" + "|".join(WORD_NUM) + r")\b", lambda m: m.group(1) + " " + str(WORD_NUM[m.group(2).lower()]), cl, flags=re.I)
+        cl = re.sub(r"\b(" + "|".join(WORD_NUM) + r")\s*(am|pm|a\.m\.|p\.m\.)\b", lambda m: str(WORD_NUM[m.group(1).lower()]) + " " + m.group(2), cl, flags=re.I)
         intent = detect_intent(cl)
         # "I want to do it with Doctor Patel" — a clause that names a person carries them forward
         wm0 = re.search(r"\bwith\s+((?:dr\.?\s+|doctor\s+)?[a-z]+(?:\s+[a-z]+)?)", cl, re.I)
@@ -477,8 +482,11 @@ def parse(transcript: str, contacts: Contacts, today: datetime, ablate: bool = F
                 wc, _ = contacts.resolve(wm.group(1))
                 if len(wc) == 1:
                     carry_recipient = Slot(wc[0]["name"], Source.deterministic, 0.8, "mentioned with the event")
+                    proper = wc[0]["name"].split(" (")[0]
                     if si.title.value and " with " not in si.title.value:
-                        si.title = Slot(f"{si.title.value} with {wc[0]['name'].split(' (')[0]}", Source.deterministic, 0.8, "event + person")
+                        si.title = Slot(f"{si.title.value} with {proper}", Source.deterministic, 0.8, "event + person")
+                    elif si.title.value:
+                        si.title = Slot(re.sub(r"with.*$", f"with {proper}", si.title.value), Source.deterministic, 0.8, "event + person")
                 elif len(wc) > 1 and si.title.value:
                     si.question = f"Which one for {si.title.value} — {' or '.join(c['name'] for c in wc)}?"
             when, amb = parse_when(cl, today)
