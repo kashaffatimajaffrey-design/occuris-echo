@@ -163,22 +163,29 @@ function speak(text){ if(!text)return; speechSynthesis.cancel(); const u=new Spe
 
 // ---------- speech in
 const SR=window.SpeechRecognition||window.webkitSpeechRecognition; let rec=null,meterTimer=null;
+let buffer=[], wantListening=false, silence=null; const SILENCE_MS=3500;
 function listen(){ if(!SR){$('sub').textContent='Voice input needs Edge or Chrome — the text box works the same.';return}
-  if(rec){rec.stop();return}
+  if(rec){ wantListening=false; rec.stop(); return }   // second click = done
+  buffer=[]; wantListening=true; startSession();
+}
+function armSilence(){ clearTimeout(silence); silence=setTimeout(()=>{ wantListening=false; if(rec) rec.stop(); }, SILENCE_MS); }
+function startSession(){
   rec=new SR(); rec.lang='en-US'; rec.interimResults=true; rec.continuous=true;
-  let finals=[], silence=null; const SILENCE_MS=2500;
-  const armSilence=()=>{clearTimeout(silence); silence=setTimeout(()=>{ if(rec) rec.stop(); }, SILENCE_MS);};
+  let finals=[];
   $('mic').setAttribute('aria-pressed','true'); $('bars').hidden=false; $('glyph').hidden=true;
-  $('headline').textContent='Listening'; $('sub').textContent='Take your time — I stop after a pause of a couple of seconds, or click the orb again when you’re done.';
+  $('headline').textContent='Listening'; $('sub').textContent='Take your time. I’ll wait until you’ve been quiet for a few seconds — or click the orb again when you’re done.';
   meterTimer=setInterval(()=>{[...$('bars').children].forEach((b,i)=>b.style.height=(10+Math.abs(Math.sin(Date.now()/190+i*.8))*30*(.5+Math.random()*.5))+'px')},70);
   rec.onresult=e=>{ finals=[]; let interim='';
     for(const r of e.results)(r.isFinal?finals.push(r[0].transcript.trim()):(interim+=r[0].transcript));
-    $('text').value=(finals.join(' ')+' '+interim).trim(); armSilence(); };
-  armSilence();
-  rec.onerror=e=>{$('sub').textContent='Mic error: '+e.error+'. You can type instead.'};
-  rec.onend=()=>{rec=null;clearTimeout(silence);clearInterval(meterTimer);$('mic').setAttribute('aria-pressed','false');$('bars').hidden=true;$('glyph').hidden=false;
-    const said=$('text').value.trim(); if(said){ send(said); } else if($('headline').textContent==='Listening'){$('headline').textContent='What do you need?';$('sub').textContent="I didn't hear anything — try again, or type it.";}};
-  rec.start();
+    $('text').value=(buffer.concat(finals).join(' ')+' '+interim).trim(); armSilence(); };
+  rec.onend=()=>{ buffer=buffer.concat(finals); finals=[]; rec=null;
+    if(wantListening){ try{ startSession(); return; }catch(e){} }   // Edge ended the session on its own — keep going
+    clearTimeout(silence); clearInterval(meterTimer);
+    $('mic').setAttribute('aria-pressed','false'); $('bars').hidden=true; $('glyph').hidden=false;
+    const said=$('text').value.trim();
+    if(said){ send(said); } else { $('headline').textContent='What do you need?'; $('sub').textContent="I didn't hear anything — try again, or type it."; } };
+  rec.start(); armSilence();
+  rec.onerror=e=>{ if(e.error==='no-speech'){ return } wantListening=false; $('sub').textContent='Mic error: '+e.error+'. You can type instead.'; };
 }
 $('mic').onclick=listen;
 addEventListener('keydown',e=>{ if(e.code==='Space'&&e.target===document.body){e.preventDefault();listen()}

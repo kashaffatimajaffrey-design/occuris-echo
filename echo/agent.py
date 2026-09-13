@@ -55,16 +55,28 @@ class Agent:
         if pend and NO.match(transcript):
             for r in pend:
                 self.p.ledger_append({**r, "status": "cancelled", "ts": _now()})
+            self._ctx = None
             tr = Trace(run_id, transcript, transcript, Intent.REFUSE, [], Gate.AUTO_OK, [], "Cancelled. Nothing was sent.")
+            self.traces.append(tr); return tr
+        if not pend and not self._ctx and (YES.match(transcript) or NO.match(transcript)) and len(transcript.split()) <= 3:
+            tr = Trace(run_id, transcript, transcript, Intent.QUERY, [], Gate.AUTO_OK, [],
+                       "Nothing is waiting for a yes or no right now." if YES.match(transcript) else "Okay — nothing to cancel.")
             self.traces.append(tr); return tr
 
         # 2. parse — merging a short answer into the previous question's sentence if there is one
         subs, meta = parse(transcript, self.contacts, self.today, ablate=self.ablate)
         if self._ctx and (not subs or len(transcript.split()) <= 4):
-            merged = self._merge_answer(transcript)
-            if merged:
-                transcript = merged
-                subs, meta = parse(transcript, self.contacts, self.today, ablate=self.ablate)
+            if self._ctx["kind"] == "title":
+                asker = self._ctx["asker"]
+                asker.title = Slot(transcript.strip(" ."), Source.deterministic, 0.9, "user named it when asked")
+                asker.question = None
+                subs = self._ctx["subs"]
+                meta = {"cleaned": self._ctx["text"] + " — " + transcript, "corrections": []}
+            else:
+                merged = self._merge_answer(transcript)
+                if merged:
+                    transcript = merged
+                    subs, meta = parse(transcript, self.contacts, self.today, ablate=self.ablate)
         self._ctx = None
         cleaned = meta.get("cleaned", transcript)
         corrections = meta.get("corrections", [])
@@ -98,6 +110,29 @@ class Agent:
             rb = self._answer_query(subs[0], transcript)
             return self._finish(Trace(run_id, transcript, cleaned, Intent.QUERY, subs, Gate.AUTO_OK, [], rb, corrections=corrections), pend)
 
+        # CREATE_EVENT with no title: ask the model for one (tagged), else ask the user — never guess "Meeting"
+        for s in subs:
+            if s.intent == Intent.CREATE_EVENT and not s.title.value and not s.question:
+                title = None
+                if self.use_model and not self.ablate:
+                    from .model import model_title
+                    title = model_title(s.clause or transcript)
+                if title:
+                    s.title = Slot(title, Source.model, 0.6, "model named the event from the utterance")
+                else:
+                    s.question = "What should I call that on your calendar?"
+                    self._remember_question(cleaned, subs)
+        # RENAME_EVENT: target the most recent calendar event this session created
+        for s in subs:
+            if s.intent == Intent.RENAME_EVENT:
+                last = next((r for r in reversed(self.p.ledger_rows()) if r.get("app") == "calendar" and r.get("status") == "done" and r.get("event_id")), None)
+                if not last:
+                    s.question = "Which event should I rename? I haven't added one in this session."
+                else:
+                    s.conflict = None
+                    s.datetime = Slot(last.get("datetime"), Source.deterministic, 0.9, "the event just created")
+                    s.clause = last["event_id"]  # carry the id
+                    s.recipient = Slot(last.get("title"), Source.deterministic, 0.9, "old title")
         # share a message across NOTIFY siblings ("tell A and B I'll be late")
         msgs = [s.message.value for s in subs if s.message.value]
         whens = [s.datetime.value for s in subs if s.datetime.value]
@@ -187,12 +222,13 @@ class Agent:
             return
         q = asker.question.lower()
         kind = "who" if ("which one" in q or "don't have a contact" in q or "who should" in q) else \
-               "message" if "message say" in q else "when"
+               "message" if "message say" in q else \
+               "title" if ("call that" in q or "call it" in q) else "when"
         mention = None
         if kind == "who":
             m = re.search(r"called (\w[\w .]*?)\.", asker.question) or None
             mention = m.group(1) if m else None
-        self._ctx = {"text": cleaned, "kind": kind, "mention": mention, "asker": asker}
+        self._ctx = {"text": cleaned, "kind": kind, "mention": mention, "asker": asker, "subs": subs}
 
     def _merge_answer(self, answer: str) -> str | None:
         ctx = self._ctx
@@ -271,7 +307,8 @@ class Agent:
                 a = Action(app, op, key, Status.done, detail=detail, latency_ms=int((time.time() - t0) * 1000), evidence=s.recipient.evidence or s.datetime.evidence)
                 self.p.ledger_append({"ts": _now(), "run_id": run_id, "intent": s.intent.value, "app": app, "op": op, "idempotency_key": key,
                                       "status": "done", "evidence": a.evidence, "readback": detail,
-                                      "recipient": s.recipient.value, "title": s.title.value})
+                                      "recipient": s.recipient.value, "title": s.title.value, "datetime": s.datetime.value,
+                                      "event_id": s.clause if s.intent == Intent.CREATE_EVENT else None})
                 return a
             except ProviderError as e:
                 last_err = e
@@ -305,8 +342,12 @@ class Agent:
             self.p.slack_post(row["slack"], f"*{user}:* {s.message.value or ''}  _(sent by voice via Occuris Echo)_")
             return f"Told {row['name'].split(' (')[0]} on Slack: “{s.message.value}”"
         if s.intent == Intent.CREATE_EVENT:
-            self.p.calendar_create(s.title.value or "Event", s.datetime.value)
+            eid = self.p.calendar_create(s.title.value or "Event", s.datetime.value)
+            s.clause = eid  # remembered in the ledger row for a later rename
             return f"Added “{s.title.value or 'Event'}” to your calendar, {speak_when(s.datetime.value)}"
+        if s.intent == Intent.RENAME_EVENT:
+            self.p.calendar_rename(s.clause, s.title.value)
+            return f"Renamed “{s.recipient.value}” to “{s.title.value}”, {speak_when(s.datetime.value)}"
         if s.intent == Intent.UPDATE_EVENT:
             ev = self.p.calendar_find(s.title.value or "")
             if not ev:
@@ -433,12 +474,12 @@ def _overlaps(e, start_iso) -> bool:
 
 def _app(s: SubIntent) -> str:
     return {Intent.REPLY_EMAIL: "gmail", Intent.SEND_EMAIL: "gmail", Intent.NOTIFY: "slack",
-            Intent.CREATE_EVENT: "calendar", Intent.UPDATE_EVENT: "calendar"}.get(s.intent, "agent")
+            Intent.CREATE_EVENT: "calendar", Intent.UPDATE_EVENT: "calendar", Intent.RENAME_EVENT: "calendar"}.get(s.intent, "agent")
 
 
 def _op(s: SubIntent) -> str:
     return {Intent.REPLY_EMAIL: "reply", Intent.SEND_EMAIL: "send", Intent.NOTIFY: "post",
-            Intent.CREATE_EVENT: "create", Intent.UPDATE_EVENT: "update"}.get(s.intent, "noop")
+            Intent.CREATE_EVENT: "create", Intent.UPDATE_EVENT: "update", Intent.RENAME_EVENT: "rename"}.get(s.intent, "noop")
 
 
 def _now() -> str:

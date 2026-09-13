@@ -115,6 +115,15 @@ class Twins:
                 return event_id
         raise ProviderError("calendar", 404)
 
+    def calendar_rename(self, event_id, title):
+        self._maybe_fail("calendar_update")
+        for e in self._events:
+            if e["id"] == event_id:
+                e["title"] = title
+                self._log("calendar_rename", id=event_id, title=title)
+                return event_id
+        raise ProviderError("calendar", 404)
+
     def calendar_count(self):
         return len(self._events)
 

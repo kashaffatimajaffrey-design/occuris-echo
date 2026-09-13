@@ -109,8 +109,12 @@ def parse_when(text: str, today: datetime) -> tuple[Slot, bool]:
 
 
 # ---------------------------------------------------------------- intents
+RENAME = re.compile(r"(?:it'?s\s+)?not\s+(?:a\s+|an\s+|the\s+)?([a-z][a-z ]*?),?\s+(?:it'?s\s+)?(?:supposed to be\s+|meant to be\s+|should be\s+)?(?:a\s+|an\s+|the\s+)?([a-z][a-z ]*?)(?:\s*$|[.,])|\b(?:call it|rename it to|name it|change (?:the )?(?:name|title) to)\s+(?:a\s+|an\s+|the\s+)?([a-z][a-z ]*?)\s*$", re.I)
+
+
 def detect_intent(clause: str) -> Intent | None:
     c = clause.lower()
+    if RENAME.search(c): return Intent.RENAME_EVENT
     if re.search(r"\b(what'?s on|what is on|what do i (have|need)|did i|have i|is there)\b", c) or c.rstrip().endswith("?"):
         return Intent.QUERY
     if re.search(r"\b(reply|respond|write back)\b", c): return Intent.REPLY_EMAIL
@@ -206,6 +210,15 @@ def parse(transcript: str, contacts: Contacts, today: datetime, ablate: bool = F
         return [], meta
 
     subs: list[SubIntent] = []
+    # a correction of the last thing done ("it's not a meeting, it's a lunch") is one intent, not two clauses
+    rm = RENAME.search(cleaned.lower())
+    if rm and not re.search(r"(reply|email|tell|put|add|schedule|book)", cleaned.lower()):
+        new_title = (rm.group(2) or rm.group(3) or "").strip()
+        si = SubIntent(intent=Intent.RENAME_EVENT, clause=cleaned)
+        si.title = Slot(new_title, Source.deterministic, 0.9, "rename phrase") if new_title else Slot(None, Source.none)
+        if not new_title:
+            si.question = "What should I call it?"
+        return [si], meta
     clauses = split_clauses(cleaned)
     carry_recipient: Slot | None = None
     carry_when: Slot | None = None
@@ -247,6 +260,12 @@ def parse(transcript: str, contacts: Contacts, today: datetime, ablate: bool = F
             when, amb = parse_when(cl, today)
             si.datetime = when
             carry_recipient = si.recipient
+        elif intent == Intent.RENAME_EVENT:
+            m = RENAME.search(cl.lower())
+            new_title = (m.group(2) or m.group(3) or "").strip()
+            si.title = Slot(new_title, Source.deterministic, 0.9, "rename phrase") if new_title else Slot(None, Source.none)
+            if not new_title:
+                si.question = "What should I call it?"
         elif intent in (Intent.CREATE_EVENT, Intent.UPDATE_EVENT):
             si.title = extract_title(cl)
             when, amb = parse_when(cl, today)
@@ -263,8 +282,10 @@ def parse(transcript: str, contacts: Contacts, today: datetime, ablate: bool = F
                 si.question = f"What time on {datetime.fromisoformat(when.value).strftime('%A')}?"
             if not si.title.value:
                 who = carry_recipient.value if (carry_recipient and carry_recipient.value) else None
-                si.title = Slot(f"Follow-up — {who}" if who else "Meeting",
-                                Source.deterministic if who else Source.model, 0.6, "inferred title")
+                if who:
+                    si.title = Slot(f"Follow-up — {who}", Source.deterministic, 0.8, "title from the reply's recipient")
+                else:
+                    si.title = Slot(None, Source.none, 0.0, "no title in utterance")  # agent will ask the model, then the user
         elif intent == Intent.QUERY:
             when, _ = parse_when(cl, today)
             si.datetime = when

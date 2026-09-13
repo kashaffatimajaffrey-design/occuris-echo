@@ -163,6 +163,13 @@ class Real:
         self.calls.append({"op": "calendar_update", "id": event_id})
         return event_id
 
+    def calendar_rename(self, event_id, title):
+        ev = self.cal.events().get(calendarId="primary", eventId=event_id).execute()
+        ev["summary"] = title
+        self._wrap("calendar", lambda: self.cal.events().update(calendarId="primary", eventId=event_id, body=ev).execute())
+        self.calls.append({"op": "calendar_rename", "id": event_id})
+        return event_id
+
     def calendar_count(self):
         return len(self.calendar_list(self.today))
 
@@ -176,7 +183,7 @@ class Real:
         return len([c for c in self.calls if c["op"] == "slack_post"])
 
     # ------------------------------------------------------------ sheets: ledger + contacts
-    LEDGER_COLS = ["ts", "run_id", "intent", "app", "op", "idempotency_key", "status", "evidence", "readback", "recipient", "datetime", "message", "title", "conflict"]
+    LEDGER_COLS = ["ts", "run_id", "intent", "app", "op", "idempotency_key", "status", "evidence", "readback", "recipient", "datetime", "message", "title", "conflict", "event_id"]
 
     def ledger_append(self, row):
         values = [[str(row.get(c, "") if row.get(c) is not None else "") for c in self.LEDGER_COLS]]
@@ -187,7 +194,7 @@ class Real:
 
     def ledger_rows(self):
         if self._ledger_cache is None:
-            r = self.sheets.spreadsheets().values().get(spreadsheetId=self.sheet_id, range="ledger!A2:N").execute()
+            r = self.sheets.spreadsheets().values().get(spreadsheetId=self.sheet_id, range="ledger!A2:O").execute()
             rows = []
             for v in r.get("values", []):
                 v = v + [""] * (len(self.LEDGER_COLS) - len(v))

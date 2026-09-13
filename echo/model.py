@@ -25,6 +25,22 @@ Return ONLY a JSON array. Each element: {"intent": one of REPLY_EMAIL|SEND_EMAIL
 Never invent a name, date or time that the user did not say. If unsure, use null. If the sentence is not a request, return []."""
 
 
+def model_title(clause: str) -> str | None:
+    """Name a calendar event from the user's words. 2–5 words, or null if the words don't say."""
+    if not os.getenv("ANTHROPIC_API_KEY"):
+        return None
+    try:
+        import anthropic
+        r = anthropic.Anthropic().messages.create(
+            model=os.getenv("ECHO_MODEL", "claude-sonnet-5"), max_tokens=30,
+            system="Given one spoken sentence about a calendar entry, reply with ONLY a short event title (2-5 words) taken from the user's own words, e.g. 'lunch with Sam'. If the sentence doesn't say what the event is, reply exactly: null",
+            messages=[{"role": "user", "content": clause}])
+        text = " ".join(b.text for b in r.content if getattr(b, "type", "") == "text").strip().strip('"\'')
+        return None if (not text or text.lower() == "null" or len(text) > 60) else text
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def model_parse(transcript: str, contacts: Contacts, today: datetime) -> tuple[list[SubIntent], str]:
     """Returns (subintents, note). Empty list if the model can't help or no API key."""
     if not os.getenv("ANTHROPIC_API_KEY"):
