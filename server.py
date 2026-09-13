@@ -25,12 +25,12 @@ app = FastAPI(title="Occuris Echo")
 if os.getenv("ECHO_TWINS") == "1":
     from echo.providers.twins import Twins
     providers = Twins()
-    agent = Agent(providers, today=providers.today)
+    agent = Agent(providers, use_model=True, today=providers.today)
     MODE = "twins"
 else:
     from echo.providers.real import Real
     providers = Real()
-    agent = Agent(providers, today=providers.today)
+    agent = Agent(providers, use_model=True, today=providers.today)
     MODE = "real"
 
 LOG: list[dict] = []  # action lines shown on the page, newest last

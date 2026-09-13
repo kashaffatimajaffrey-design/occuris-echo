@@ -47,7 +47,10 @@ def readback_for(actions: list[Action], subs: list[SubIntent], confirm: bool = F
             if s.intent.value in ("REPLY_EMAIL", "SEND_EMAIL"):
                 msg = s.message.value or (f"{speak_when(s.datetime.value)} works" if s.datetime.value else "")
                 ev = f" — {s.recipient.evidence}" if "matches" in (s.recipient.evidence or "") or "near" in (s.recipient.evidence or "") else ""
-                parts.append(f"Reply to {s.recipient.value}: “{msg}”{ev}")
+                verb = "Reply to" if s.intent.value == "REPLY_EMAIL" else "Email"
+                parts.append(f"{verb} {s.recipient.value}: “{msg}”{ev}")
+            elif s.intent.value == "NOTIFY":
+                parts.append(f"Message {_who(s)} on Slack: “{s.message.value or ''}”")
             elif s.intent.value == "UPDATE_EVENT":
                 parts.append(f"Move {s.title.value or 'the event'} to {speak_when(s.datetime.value)}")
             elif s.intent.value == "CREATE_EVENT" and s.conflict:

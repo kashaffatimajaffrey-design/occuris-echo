@@ -53,9 +53,18 @@ def is_garbage(text: str) -> bool:
 WEEKDAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
 
 
+WORD_NUM = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10, "eleven": 11, "twelve": 12}
+
+
 def parse_when(text: str, today: datetime) -> tuple[Slot, bool]:
     """Returns (slot, ambiguous_next_weekday). 'next Thursday' said on a Thursday is ambiguous."""
     t = text.lower()
+    # word numbers after "at": "at ten", "at two o'clock"
+    t = re.sub(r"\bat\s+(" + "|".join(WORD_NUM) + r")\b", lambda m: "at " + str(WORD_NUM[m.group(1)]), t)
+    t = re.sub(r"\b(" + "|".join(WORD_NUM) + r")\s+o'?clock\b", lambda m: str(WORD_NUM[m.group(1)]), t)
+    t = re.sub(r"\bo'?clock\b", "", t)
+    if re.search(r"\bmorning\b", t) and not re.search(r"\b(am|pm)\b", t): t += " am"
+    if re.search(r"\b(afternoon|evening|tonight)\b", t) and not re.search(r"\b(am|pm)\b", t): t += " pm"
     ambiguous = False
     m = re.search(r"\bnext\s+(" + "|".join(WEEKDAYS) + r")\b", t)
     if m and WEEKDAYS[today.weekday()] == m.group(1):
@@ -66,6 +75,8 @@ def parse_when(text: str, today: datetime) -> tuple[Slot, bool]:
     if tm:
         hour = int(tm.group(1)); minute = int(tm.group(2) or 0)
         ap = (tm.group(3) or "").replace(".", "")
+        if not ap and t.rstrip().endswith((" am", " pm")):
+            ap = t.rstrip()[-2:]
         if ap == "pm" and hour < 12: hour += 12
         if ap == "am" and hour == 12: hour = 0
         if not ap and 1 <= hour <= 7: hour += 12  # "at 2" → 14:00 (working-hours heuristic, tagged below)
@@ -106,7 +117,7 @@ def detect_intent(clause: str) -> Intent | None:
     if re.search(r"\b(email|mail)\b", c): return Intent.SEND_EMAIL
     if re.search(r"\bsend\b", c): return Intent.SEND_EMAIL
     if re.search(r"\b(move|reschedule|push|shift)\b", c): return Intent.UPDATE_EVENT
-    if re.search(r"\b(put|add|schedule|book|calendar)\b", c) or re.search(r"\bi have (a|an|the)\b", c) or re.search(r"\bi need to go\b", c):
+    if re.search(r"\b(put|add|schedule|book|calendar|stick)\b", c) or re.search(r"\bi(?:'ve| have)? ?(?:got|have) (a|an|the)\b", c) or re.search(r"\bi need to go\b", c):
         return Intent.CREATE_EVENT
     if re.search(r"\b(tell|text|message|notify|let .* know|ping)\b", c): return Intent.NOTIFY
     if re.search(r"\b(remind)\b", c): return Intent.CREATE_EVENT
@@ -128,10 +139,19 @@ def extract_recipient(clause: str, contacts: Contacts) -> tuple[Slot, list[dict]
     else:
         # trim trailing verbs/that-clauses: "Patel that Thursday" → "Patel"
         mention = re.split(r"\b(that|saying|say|about|i'?ll|i am|i'm|my|to)\b", mention, maxsplit=1)[0].strip(" .:")
-    cands, ev = contacts.resolve(mention)
-    if len(cands) == 1:
-        return Slot(cands[0]["name"], Source.deterministic, 0.95, ev), cands, mention
-    return Slot(None, Source.none), cands, mention
+    # try the full mention, then progressively drop trailing words ("Dr Patel know" → "Dr Patel")
+    words = mention.split()
+    tried = []
+    for n in range(len(words), 0, -1):
+        m_try = " ".join(words[:n])
+        cands, ev = contacts.resolve(m_try)
+        tried.append((m_try, cands, ev))
+        if len(cands) == 1:
+            return Slot(cands[0]["name"], Source.deterministic, 0.95, ev), cands, m_try
+    for m_try, cands, ev in tried:
+        if cands:
+            return Slot(None, Source.none), cands, m_try
+    return Slot(None, Source.none), [], mention
 
 
 def extract_message(clause: str) -> Slot:
@@ -148,7 +168,7 @@ def extract_title(clause: str) -> Slot:
     m = re.search(r"\b(?:put|add|schedule|book)\s+(?:the\s+|a\s+|an\s+)?(.+?)\s+(?:on|to|in)\s+(?:my\s+)?calendar", c)
     if m and m.group(1).strip() not in ("it", "that", "this", "them"):
         return Slot(m.group(1).strip(), Source.deterministic, 0.9, "put X on calendar")
-    m = re.search(r"\bi have (?:a|an|the)\s+([a-z ]+?)\s+(?:at|on|with)\b", c) or re.search(r"\bi have (?:a|an|the)\s+([a-z]+)", c)
+    m = re.search(r"\bi(?:'ve| have)? ?(?:got|have) (?:a|an|the)\s+([a-z ]+?)\s+(?:at|on|with|friday|monday|tuesday|wednesday|thursday|saturday|sunday|tomorrow)\b", c) or re.search(r"\bi(?:'ve| have)? ?(?:got|have) (?:a|an|the)\s+([a-z]+)", c)
     if m: return Slot(m.group(1).strip(), Source.deterministic, 0.85, "I have a X")
     m = re.search(r"\b(?:add|schedule|book)\s+(.+?)\s+(?:on|at|for)\b", c)
     if m: return Slot(m.group(1).strip(), Source.deterministic, 0.8, "add X at")
@@ -198,6 +218,9 @@ def parse(transcript: str, contacts: Contacts, today: datetime, ablate: bool = F
                 intent = Intent.CREATE_EVENT
             else:
                 continue
+        if intent == Intent.CREATE_EVENT and subs and subs[-1].intent == Intent.CREATE_EVENT \
+                and re.search(r"\b(it|that|this)\b", cl.lower()) and not re.search(r"\d", cl):
+            continue  # "…, stick it in the calendar" — same event, no new information
         si = SubIntent(intent=intent)
         if intent in (Intent.REPLY_EMAIL, Intent.SEND_EMAIL, Intent.NOTIFY):
             slot, cands, mention = extract_recipient(cl, contacts)

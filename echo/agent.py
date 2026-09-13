@@ -68,8 +68,11 @@ class Agent:
             return self._finish(Trace(run_id, transcript, cleaned, Intent.REFUSE, subs, Gate.BLOCKED, [],
                                       "I won't send a password or similar secret by email or chat. Nothing was sent.",
                                       blocked_reason="sensitive content", corrections=corrections), pend)
+        model_note = None
+        if not subs and self.use_model and not self.ablate:
+            from .model import model_parse
+            subs, model_note = model_parse(transcript, self.contacts, self.today)
         if not subs:
-            # optional model fallback would go here; without it, ask.
             return self._finish(Trace(run_id, transcript, cleaned, Intent.CLARIFY, [], Gate.AUTO_OK, [],
                                       "I'm not sure what you'd like me to do. Could you say it another way?",
                                       question="I'm not sure what you'd like me to do — could you say it another way?",
@@ -99,12 +102,17 @@ class Agent:
                 ev = self.p.calendar_find(s.title.value or "")
                 if ev:
                     s.datetime = Slot(ev["start"][:10] + s.datetime.value[10:], Source.deterministic, 0.85, "time from utterance, date from existing event")
-        # a resolved NOTIFY contact with no channel on file needs a question, not a failed call
+        # a resolved NOTIFY contact with no channel on file needs a question, not a failed call;
+        # one with email but no Slack gets an email instead
         for s in subs:
             if s.intent == Intent.NOTIFY and s.recipient.value and not s.question:
                 row = self._contact(s.recipient.value)
-                if row is not None and not row.get("slack") and not row.get("email"):
-                    s.question = f"How should I reach {_short(s.recipient.value)}? I don't have a channel on file."
+                if row is not None and not row.get("slack"):
+                    if row.get("email"):
+                        s.intent = Intent.SEND_EMAIL
+                        s.channel = Slot("email", Source.deterministic, 0.8, "no Slack on file; email instead")
+                    else:
+                        s.question = f"How should I reach {_short(s.recipient.value)}? I don't have a channel on file."
         # 5. clarifications — one question, the most blocking
         q = next((s.question for s in subs if s.question), None)
         if q:
