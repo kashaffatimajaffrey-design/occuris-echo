@@ -229,8 +229,16 @@ def parse(transcript: str, contacts: Contacts, today: datetime, ablate: bool = F
 
     subs: list[SubIntent] = []
     # a correction of the last thing done ("it's not a meeting, it's a lunch") is one intent, not two clauses
-    rm = RENAME.search(cleaned.lower())
-    if rm and not re.search(r"(reply|email|tell|put|add|schedule|book)", cleaned.lower()):
+    lc = cleaned.lower()
+    # "call it spade. spa day" — a rename where the mic heard a false start: the last segment is the name
+    cm = re.match(r"^\s*(?:call it|name it|title it|rename it to|rename it)\s+(.+)$", lc)
+    if cm and not RENAME.search(lc):
+        last = [x.strip() for x in re.split(r"[.,;]", cm.group(1)) if x.strip()]
+        si = SubIntent(intent=Intent.RENAME_EVENT, clause=cleaned)
+        si.title = Slot(last[-1], Source.deterministic, 0.85, "rename phrase, last version") if last else Slot(None, Source.none)
+        return [si], meta
+    rm = RENAME.search(lc)
+    if rm and not re.search(r"\b(reply|email|tell|put|add|schedule|book)\b", lc):
         new_title = (rm.group(2) or rm.group(3) or rm.group(5) or "").strip()
         old_title = (rm.group(1) or rm.group(4) or "").strip()
         # "call it spade. spa day" — the words after a sentence break are the correction; last version wins
