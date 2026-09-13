@@ -151,7 +151,7 @@ def extract_recipient(clause: str, contacts: Contacts) -> tuple[Slot, list[dict]
     m = RECIP.search(clause)
     if not m:
         return Slot(None, Source.none), [], "no recipient phrase"
-    mention = m.group(1)
+    mention = re.sub(r"\s+(as well|as|too|also|please|about it|about this)\s*$", "", m.group(1), flags=re.I)
     rel = re.match(r"my\s+(sister|brother|mum|mom|dad|wife|husband|partner)\b", mention, re.I)
     if rel:
         mention = "my " + rel.group(1).lower()
@@ -326,6 +326,8 @@ def parse(transcript: str, contacts: Contacts, today: datetime, ablate: bool = F
             if not slot.value:
                 if len(cands) > 1:
                     si.question = f"Which one — {' or '.join(c['name'] for c in cands)}?"
+                elif mention and mention.lower() in ("him", "her", "them"):
+                    si.question = f"Who do you mean by “{mention}”? Say their name."
                 elif mention:
                     si.question = f"I don't have a contact called {mention}. Who do you mean?"
                 else:
