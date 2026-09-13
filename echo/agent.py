@@ -79,7 +79,9 @@ class Agent:
             tr = Trace(run_id, transcript, transcript, Intent.QUERY, subs, Gate.AUTO_OK, [], rb, question=asker.question)
             self.traces.append(tr); self._ctx = ctx
             return tr
-        if self._ctx and self._ctx["kind"] in ("similar", "when", "title") and subs and len(subs) == 1 and subs[0].intent == Intent.UPDATE_EVENT and subs[0].clause == "__last__" and subs[0].datetime.value:
+        if self._ctx and subs and any(x.clause == "__correct_person__" for x in subs):
+            self._ctx = None   # an explicit correction outranks the open question
+        if self._ctx and self._ctx["kind"] in ("similar", "when", "title") and self._ctx["asker"].intent == Intent.CREATE_EVENT and subs and len(subs) == 1 and subs[0].intent == Intent.UPDATE_EVENT and subs[0].clause == "__last__" and subs[0].datetime.value:
             # "Not Wednesday, Thursday" while a question about a not-yet-created event is open: move that event's day
             asker = self._ctx["asker"]
             old_dt = asker.datetime.value or "T12:00"
@@ -194,7 +196,20 @@ class Agent:
                 last_mail = next((r for r in reversed(self.p.ledger_rows()) if r.get("app") == "gmail" and r.get("status") == "done"), None)
                 wrong = last_mail.get("recipient") if last_mail else None
                 if not last_mail:
-                    s.intent = Intent.SEND_EMAIL; s.question = f"What should I send {s.recipient.value}?"
+                    # no email went out — just fix the event that names the wrong person
+                    new = _short(s.recipient.value)
+                    ev = next((e for e in self.p.calendar_upcoming() if re.search(r"\b(dr\.?\s+)?\w+\s+patel\b|\bwith\b", (e.get("title") or "").lower())), None)
+                    ev = next((e for e in self.p.calendar_upcoming() if "with" in (e.get("title") or "").lower() and new.lower() not in (e.get("title") or "").lower()), ev)
+                    subs.remove(s)
+                    if ev:
+                        r = SubIntent(intent=Intent.RENAME_EVENT, clause=ev["id"])
+                        old_t = ev["title"] or ""
+                        new_t = re.sub(r"\bwith\b.*$", f"with {new}", old_t, flags=re.I) if "with" in old_t.lower() else f"{old_t} with {new}"
+                        r.title = Slot(new_t, Source.deterministic, 0.85, "person corrected")
+                        r.recipient = Slot(old_t, Source.deterministic, 0.9, "old title"); r.datetime = Slot(ev["start"], Source.deterministic, 0.9)
+                        subs.append(r)
+                    else:
+                        self._note = f"I don't see an event with a person in it to change to {new}. "
                     continue
                 s.message = Slot(last_mail.get("message") or last_mail.get("readback", "").split("“")[-1].rstrip("”"), Source.deterministic, 0.8, "same message as the one already sent")
                 s.clause = ""
@@ -215,7 +230,7 @@ class Agent:
                 else:
                     old_time = (last.get("datetime") or "T09:00")[10:]
                     s.datetime = Slot(s.datetime.value[:10] + old_time, Source.deterministic, 0.85, "day corrected, time kept")
-                    s.title = Slot(last.get("title"), Source.deterministic, 0.9, "the event just created")
+                    s.title = Slot(None, Source.none)   # only the day changes
                     s.recipient = Slot(last["event_id"], Source.deterministic, 0.9, "existing event id")
         # UPDATE_EVENT phrased as delete: we never delete — say so and offer to change it instead
         for s in subs:

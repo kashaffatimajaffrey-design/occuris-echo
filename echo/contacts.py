@@ -35,12 +35,13 @@ class Contacts:
         if len(exact) > 1:
             return exact, f"'{mention}' matches {len(exact)} contacts: " + ", ".join(r["name"] for r in exact)
         # score by how many distinct name tokens the mention contains ("dr anita patel" → Anita 3, Ravi 1)
-        mtoks = set(m.split())
+        mtoks = set(m.split()) - {"dr", "mr", "ms", "mrs", "doctor", "the", "my"}   # titles are not name parts
         scored = []
         for row in self.rows:
             toks = set()
             for a in self._aliases(row):
                 toks |= set(a.split())
+            toks -= {"dr", "mr", "ms", "mrs", "my"}
             hit = len(mtoks & toks)
             if hit:
                 scored.append((hit, row))

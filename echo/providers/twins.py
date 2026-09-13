@@ -29,6 +29,12 @@ DEFAULT_INBOX = [
 ]
 
 
+def _n(s):
+    import re as _re
+    s = (s or "").lower().replace("doctor", "dr")
+    return _re.sub(r"[^a-z0-9 ]", "", s).strip()
+
+
 class Twins:
     def __init__(self, scenario: dict | None = None):
         sc = scenario or {}
@@ -93,9 +99,9 @@ class Twins:
         return list(self._events)
 
     def calendar_find(self, title_like):
-        t = title_like.lower()
+        t = _n(title_like)
         for e in self._events:
-            if t in e["title"].lower():
+            if t and t in _n(e["title"]):
                 return e
         return None
 

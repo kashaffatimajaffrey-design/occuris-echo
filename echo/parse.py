@@ -24,7 +24,9 @@ CLAUSE_SPLIT = re.compile(r"(?<![Dd]r)(?<![Mm]r)(?<![Mm]s)(?<![Mm]rs)(?<![Ss]t)\
 
 def strip_disfluencies(text: str) -> str:
     t = re.sub(r"\be-?mail\b", "email", text, flags=re.I)
+    t = re.sub(r"\bdoctor\.?(?=\s+[A-Za-z])", "Dr.", t, flags=re.I)   # "doctor Ravi" / "Doctor. Anita" → "Dr. …"
     t = re.sub(DISFLUENCIES, " ", t, flags=re.I)
+    t = re.sub(r"\s*,(\s*,)+", ",", t)          # ", uh," → ","
     t = re.sub(r"\s+", " ", t).strip(" ,.")
     return t
 
@@ -61,7 +63,8 @@ def parse_when(text: str, today: datetime) -> tuple[Slot, bool]:
     """Returns (slot, ambiguous_next_weekday). 'next Thursday' said on a Thursday is ambiguous."""
     t = text.lower()
     # word numbers after "at": "at ten", "at two o'clock"
-    t = re.sub(r"\bat\s+(" + "|".join(WORD_NUM) + r")\b", lambda m: "at " + str(WORD_NUM[m.group(1)]), t)
+    t = re.sub(r"\b(at|on|around|by|about)\s+(" + "|".join(WORD_NUM) + r")\b(?=\s*(?:am|pm|o'?clock|$|\s|,|\.))", lambda m: m.group(1) + " " + str(WORD_NUM[m.group(2)]), t)
+    t = re.sub(r"\b(" + "|".join(WORD_NUM) + r")\s*(am|pm|a\.m\.|p\.m\.)\b", lambda m: str(WORD_NUM[m.group(1)]) + " " + m.group(2), t)
     t = re.sub(r"\b(" + "|".join(WORD_NUM) + r")\s+o'?clock\b", lambda m: str(WORD_NUM[m.group(1)]), t)
     t = re.sub(r"\bo'?clock\b", "", t)
     if re.search(r"\bmorning\b", t) and not re.search(r"\b(am|pm)\b", t): t += " am"
@@ -98,9 +101,9 @@ def parse_when(text: str, today: datetime) -> tuple[Slot, bool]:
     if day is None and hour is not None:
         day = today; no_day = True  # time with no day ⇒ today, flagged
     if day is None:
-        # last resort: dateparser
-        dp = dateparser.parse(t, settings={"RELATIVE_BASE": today, "PREFER_DATES_FROM": "future"})
-        if dp and re.search(r"\d|monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow", t):
+        # last resort: dateparser — only when the text has a digit; it must never invent a day from a bare time word
+        dp = dateparser.parse(t, settings={"RELATIVE_BASE": today, "PREFER_DATES_FROM": "future"}) if re.search(r"\d", t) else None
+        if dp and re.search(r"\d", t):
             return Slot(dp.replace(second=0, microsecond=0).isoformat(timespec="minutes"), Source.deterministic, 0.6, "dateparser"), ambiguous
         return Slot(None, Source.none), ambiguous
     dt = day.replace(hour=hour or 0, minute=minute or 0, second=0, microsecond=0)
@@ -122,8 +125,8 @@ def detect_intent(clause: str) -> Intent | None:
     polite = re.match(r"^\s*(?:so\s+)?(?:can|could|would|will)\s+you\s+(?:please\s+)?|^\s*please\s+", c)
     if polite:
         c = c[polite.end():]
-    has_verb = re.search(r"\b(reply|respond|email|mail|send|tell|text|message|notify|ping|put|add|schedule|book|move|reschedule|change|rename|delete|remove|remind)\b", c)
-    if re.search(r"\b(what'?s on|what is on|what do i (have|need)|do i have|did i|have i|is there|am i free|any slots?|any time|when am i free|what times?|available|tell me if|let me know if)\b", c) \
+    has_verb = re.search(r"\b(reply|respond|email|mail|send|tell|text|message|notify|ping|put|add|schedule|book|move|reschedule|change|edit|fix|correct|update|rename|delete|remove|remind)\b", c)
+    if re.search(r"\b(what'?s on|what is on|what do i (have|need)|do i have|did i|have i|is there|am i free|any slots?|any time|when am i free|what times?|available|tell me if|let me know if|tell me when|look at my (schedule|calendar|week|day)|check my (schedule|calendar)|see if i(?:'m| am) free|when (do|will) i have|when i have (time|a slot))\b", c) \
             or (c.rstrip().endswith("?") and not has_verb):
         return Intent.QUERY
     if re.search(r"\b(reply|respond|write back)\b", c): return Intent.REPLY_EMAIL
@@ -266,6 +269,15 @@ def parse(transcript: str, contacts: Contacts, today: datetime, ablate: bool = F
     subs: list[SubIntent] = []
     # a correction of the last thing done ("it's not a meeting, it's a lunch") is one intent, not two clauses
     lc = cleaned.lower()
+    dm = re.search(r"\bnot\s+(" + "|".join(WEEKDAYS) + r")\b", lc)
+    if dm:
+        other = [w for w in WEEKDAYS if w != dm.group(1) and re.search(r"\b" + w + r"\b", lc)]
+        if other and not re.search(r"\b(book|put|add|schedule)\b.*\b" + other[0] + r"\b", lc) or (other and re.search(r"\b(told you|i said|it'?s|fix|move|change)\b", lc)):
+            si = SubIntent(intent=Intent.UPDATE_EVENT, clause="__last__")
+            when, _ = parse_when(other[0], today)
+            si.datetime = when
+            si.title = Slot(None, Source.none)
+            return [si], meta
     # "call it spade. spa day" — a rename where the mic heard a false start: the last segment is the name
     cm = re.match(r"^\s*(?:call it|name it|title it|rename it to|rename it)\s+(.+)$", lc)
     if cm and not RENAME.search(lc):
@@ -274,6 +286,21 @@ def parse(transcript: str, contacts: Contacts, today: datetime, ablate: bool = F
         si.title = Slot(last[-1], Source.deterministic, 0.85, "rename phrase, last version") if last else Slot(None, Source.none)
         return [si], meta
     # "I don't want Dr. Anita Patel, it's actually Ravi Patel" — a person correction
+    NAME = r"((?:dr\.?\s+)?[a-z]+(?:\s+[a-z]+)?)"
+    pm2 = re.search(r"\b(?:with|to|for)\s+" + NAME + r"\s*,?\s+(?:and\s+)?not\s+(?:with\s+)?" + NAME, lc)   # "with Ravi Patel, not Anita Patel"
+    if pm2:
+        pc, _ = contacts.resolve(pm2.group(1)); px, _ = contacts.resolve(pm2.group(2))
+        if len(pc) == 1 and len(px) == 1 and pc[0]["name"] != px[0]["name"]:
+            si = SubIntent(intent=Intent.SEND_EMAIL, clause="__correct_person__")
+            si.recipient = Slot(pc[0]["name"], Source.deterministic, 0.9, "corrected person")
+            return [si], meta
+    pm3 = re.fullmatch(r"\s*(?:no,?\s+)?it'?s\s+" + NAME + r"\s*\.?", lc)   # "It's Dr. Ravi Patel."
+    if pm3:
+        pc, _ = contacts.resolve(pm3.group(1))
+        if len(pc) == 1:
+            si = SubIntent(intent=Intent.SEND_EMAIL, clause="__correct_person__")
+            si.recipient = Slot(pc[0]["name"], Source.deterministic, 0.9, "corrected person")
+            return [si], meta
     pm = re.search(r"\b(?:it'?s actually\s+|actually it'?s\s+|not\s+(?:with\s+)?(?:dr\.?\s+|doctor\s+)?[a-z]+(?:\s+[a-z]+)?,?\s+(?:it'?s\s+)?(?:actually\s+)?)((?:dr\.?\s+|doctor\s+)?[a-z]+(?:\s+[a-z]+)?)", lc)
     if pm:
         pc, _ = contacts.resolve(pm.group(1))
@@ -320,7 +347,9 @@ def parse(transcript: str, contacts: Contacts, today: datetime, ablate: bool = F
         intent = detect_intent(cl)
         # "I want to do it with Doctor Patel" — a clause that names a person carries them forward
         wm0 = re.search(r"\bwith\s+((?:dr\.?\s+|doctor\s+)?[a-z]+(?:\s+[a-z]+)?)", cl, re.I)
-        if wm0 and intent is None:
+        _frag_day = re.match(r"\s*(?:on\s+)?(?:next\s+)?(?:" + "|".join(WEEKDAYS) + r"|tomorrow|today)\b", cl, re.I)
+        _frag_time = re.match(r"\s*(?:at\s+|on\s+)?\d{1,2}(?::\d{2})?\s*(?:am|pm)?\s*$", cl, re.I)
+        if wm0 and intent is None and not _frag_day and not _frag_time:
             wc0, _ = contacts.resolve(wm0.group(1))
             if len(wc0) == 1:
                 carry_recipient = Slot(wc0[0]["name"], Source.deterministic, 0.8, "mentioned with the event")
@@ -426,6 +455,10 @@ def parse(transcript: str, contacts: Contacts, today: datetime, ablate: bool = F
                 wc, _ = contacts.resolve(wm.group(1))
                 if len(wc) == 1:
                     carry_recipient = Slot(wc[0]["name"], Source.deterministic, 0.8, "mentioned with the event")
+                    if si.title.value and " with " not in si.title.value:
+                        si.title = Slot(f"{si.title.value} with {wc[0]['name'].split(' (')[0]}", Source.deterministic, 0.8, "event + person")
+                elif len(wc) > 1 and si.title.value:
+                    si.question = f"Which one for {si.title.value} — {' or '.join(c['name'] for c in wc)}?"
             when, amb = parse_when(cl, today)
             si.datetime = when
             if amb:

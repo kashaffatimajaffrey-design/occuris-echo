@@ -153,8 +153,11 @@ class Real:
         now = datetime.now()
         r = self.cal.events().list(calendarId="primary", timeMin=(now - timedelta(days=1)).isoformat() + "+05:00",
                                    maxResults=50, singleEvents=True, orderBy="startTime").execute()
+        import re as _re
+        _n = lambda x: _re.sub(r"[^a-z0-9 ]", "", (x or "").lower().replace("doctor", "dr")).strip()
+        t = _n(t)
         for e in r.get("items", []):
-            if t and t in e.get("summary", "").lower():
+            if t and t in _n(e.get("summary", "")):
                 s = e.get("start", {}).get("dateTime", "")
                 return {"id": e["id"], "title": e.get("summary"), "start": s[:16], "end": e.get("end", {}).get("dateTime", "")[:16]}
         return None
