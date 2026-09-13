@@ -171,13 +171,14 @@ def split_clauses(text: str) -> list[str]:
     return parts or [text]
 
 
-def parse(transcript: str, contacts: Contacts, today: datetime) -> tuple[list[SubIntent], dict]:
-    """Returns subintents and a meta dict: cleaned, corrections, retraction, garbage, sensitive."""
+def parse(transcript: str, contacts: Contacts, today: datetime, ablate: bool = False) -> tuple[list[SubIntent], dict]:
+    """Returns subintents and a meta dict: cleaned, corrections, retraction, garbage, sensitive.
+    ablate=True switches off the deterministic safety rules (corrections) to measure what they buy."""
     meta = {"raw": transcript}
     if is_garbage(transcript):
         meta.update(cleaned=transcript, garbage=True); return [], meta
     stripped = strip_disfluencies(transcript)
-    cleaned, notes = apply_corrections(stripped)
+    cleaned, notes = (stripped, []) if ablate else apply_corrections(stripped)
     meta.update(cleaned=cleaned, corrections=notes, retraction=has_retraction(transcript),
                 sensitive=bool(SENSITIVE.search(transcript)))
     if meta["retraction"]:

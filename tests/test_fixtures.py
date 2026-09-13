@@ -141,9 +141,16 @@ def test_case(case):
     expected_refusal = exp.get("intent") in ("CLARIFY", "REFUSE") or exp.get("gate") == "BLOCKED"
     if expected_refusal:
         acted = any(a.status.value == "done" for a in last.actions)
-        steps["refused_correctly"] = not acted and (last.intent.value in ("CLARIFY", "REFUSE") or last.gate.value == "BLOCKED")
-        if acted:
-            silent = True  # it should have asked; it acted instead
+        refused = last.intent.value in ("CLARIFY", "REFUSE") or last.gate.value == "BLOCKED"
+        steps["refused_correctly"] = not acted and refused
+        if not refused:
+            # committed to a guess where it should have asked — silent failure, whether or not
+            # the confirmation gate later caught it (a reflexive "yes" would send it)
+            silent = True
+    # acted with wrong data = confidently wrong
+    acted_any = any(a.status.value == "done" for a in last.actions)
+    if acted_any and any(steps.get(k) is False for k in ("slots", "event_times", "state")):
+        silent = True
 
     _scores[cid] = {"set": case["set"], "steps": steps, "silent_failure": silent,
                     "over_clarified": case["set"] == "A" and last.intent.value == "CLARIFY"}

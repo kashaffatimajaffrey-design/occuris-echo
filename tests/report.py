@@ -37,7 +37,7 @@ def main():
     lines.append(f"- **Over-clarifications (A-set): {over}** — the agent asked when it should have acted")
     if abl_r:
         asil = sum(s["silent"] for s in abl_r.values())
-        lines.append(f"- **Ablation — deterministic layer off: {asil} silent failures** (Δ +{asil - silent})")
+        lines.append(f"- **Ablation — deterministic layer off: {asil} silent failures** (+{asil - silent})")
     lines.append("")
     lines.append("| Set | Cases | Pass | Silent failures |" + (" Silent (ablation) |" if abl_r else ""))
     lines.append("|---|---|---|---|" + ("---|" if abl_r else ""))
@@ -56,7 +56,7 @@ def main():
         lines.append(f"| {k} | {a} | {b} |")
     out = "\n".join(lines)
     (HERE.parent / "RESULTS.md").write_text(out, encoding="utf-8")
-    print(out)
+    print(out.encode("ascii", "replace").decode())
 
 if __name__ == "__main__":
     main()

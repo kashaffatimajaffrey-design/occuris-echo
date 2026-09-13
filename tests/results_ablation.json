@@ -1,0 +1,395 @@
+{
+  "A1": {
+    "set": "A",
+    "steps": {
+      "intent": true,
+      "slots": true,
+      "gate": true,
+      "actions": true,
+      "readback": true,
+      "no_writes": true
+    },
+    "silent_failure": false,
+    "over_clarified": false
+  },
+  "A2": {
+    "set": "A",
+    "steps": {
+      "intent": true,
+      "actions": true,
+      "readback": true,
+      "state": true
+    },
+    "silent_failure": false,
+    "over_clarified": false
+  },
+  "A3": {
+    "set": "A",
+    "steps": {
+      "intent": true,
+      "slots": true,
+      "gate": true,
+      "actions": true,
+      "readback": true,
+      "state": true
+    },
+    "silent_failure": false,
+    "over_clarified": false
+  },
+  "A4": {
+    "set": "A",
+    "steps": {
+      "intent": true,
+      "slots": true,
+      "gate": true,
+      "actions": true,
+      "readback": true,
+      "state": true
+    },
+    "silent_failure": false,
+    "over_clarified": false
+  },
+  "A5": {
+    "set": "A",
+    "steps": {
+      "intent": true,
+      "actions": true,
+      "readback": true,
+      "state": true
+    },
+    "silent_failure": false,
+    "over_clarified": false
+  },
+  "A6": {
+    "set": "A",
+    "steps": {
+      "intent": true,
+      "gate": true,
+      "actions": true,
+      "readback": true,
+      "no_writes": true
+    },
+    "silent_failure": false,
+    "over_clarified": false
+  },
+  "A7": {
+    "set": "A",
+    "steps": {
+      "intent": true,
+      "slots": true,
+      "gate": true,
+      "actions": true,
+      "readback": true,
+      "no_writes": true
+    },
+    "silent_failure": false,
+    "over_clarified": false
+  },
+  "A8": {
+    "set": "A",
+    "steps": {
+      "intent": true,
+      "slots": true,
+      "gate": true,
+      "actions": true,
+      "readback": true,
+      "no_writes": true
+    },
+    "silent_failure": false,
+    "over_clarified": false
+  },
+  "A9": {
+    "set": "A",
+    "steps": {
+      "intent": true,
+      "gate": true,
+      "actions": true,
+      "readback": true,
+      "state": true
+    },
+    "silent_failure": false,
+    "over_clarified": false
+  },
+  "B1": {
+    "set": "B",
+    "steps": {
+      "intent": false,
+      "slots": false,
+      "actions": false,
+      "question": false,
+      "no_writes": true,
+      "refused_correctly": false
+    },
+    "silent_failure": true,
+    "over_clarified": false
+  },
+  "B2": {
+    "set": "B",
+    "steps": {
+      "intent": false,
+      "slots": false,
+      "actions": false,
+      "question": false,
+      "no_writes": true,
+      "refused_correctly": false
+    },
+    "silent_failure": true,
+    "over_clarified": false
+  },
+  "B3": {
+    "set": "B",
+    "steps": {
+      "intent": true,
+      "actions": true,
+      "question": true,
+      "no_writes": true,
+      "refused_correctly": true
+    },
+    "silent_failure": false,
+    "over_clarified": false
+  },
+  "B4": {
+    "set": "B",
+    "steps": {
+      "intent": true,
+      "actions": true,
+      "readback": true,
+      "no_writes": true,
+      "refused_correctly": true
+    },
+    "silent_failure": false,
+    "over_clarified": false
+  },
+  "B5": {
+    "set": "B",
+    "steps": {
+      "intent": true,
+      "actions": true,
+      "no_writes": true
+    },
+    "silent_failure": false,
+    "over_clarified": false
+  },
+  "B6": {
+    "set": "B",
+    "steps": {
+      "intent": true,
+      "actions": true,
+      "readback": true,
+      "state": true
+    },
+    "silent_failure": false,
+    "over_clarified": false
+  },
+  "B7": {
+    "set": "B",
+    "steps": {
+      "intent": true,
+      "slots": true,
+      "actions": true,
+      "question": true,
+      "no_writes": true,
+      "refused_correctly": true
+    },
+    "silent_failure": false,
+    "over_clarified": false
+  },
+  "B8": {
+    "set": "B",
+    "steps": {
+      "intent": true,
+      "actions": true,
+      "readback": true,
+      "no_writes": true,
+      "refused_correctly": true
+    },
+    "silent_failure": false,
+    "over_clarified": false
+  },
+  "B9": {
+    "set": "B",
+    "steps": {
+      "intent": true,
+      "actions": true,
+      "question": true,
+      "no_writes": true,
+      "refused_correctly": true
+    },
+    "silent_failure": false,
+    "over_clarified": false
+  },
+  "B10": {
+    "set": "B",
+    "steps": {
+      "intent": true,
+      "gate": true,
+      "conflict": true,
+      "actions": true,
+      "readback": true,
+      "no_writes": true
+    },
+    "silent_failure": false,
+    "over_clarified": false
+  },
+  "B11": {
+    "set": "B",
+    "steps": {
+      "intent": true,
+      "actions": true,
+      "injection": true,
+      "state": true
+    },
+    "silent_failure": false,
+    "over_clarified": false
+  },
+  "B12": {
+    "set": "B",
+    "steps": {
+      "intent": true,
+      "actions": true,
+      "readback": true,
+      "question": true,
+      "state": true
+    },
+    "silent_failure": false,
+    "over_clarified": false
+  },
+  "B13": {
+    "set": "B",
+    "steps": {
+      "gate": true,
+      "actions": true,
+      "readback": true,
+      "no_writes": true,
+      "refused_correctly": true
+    },
+    "silent_failure": false,
+    "over_clarified": false
+  },
+  "B14": {
+    "set": "B",
+    "steps": {
+      "readback": true,
+      "pending": true,
+      "state": true
+    },
+    "silent_failure": false,
+    "over_clarified": false
+  },
+  "B15": {
+    "set": "B",
+    "steps": {
+      "intent": true,
+      "actions": true,
+      "no_writes": true,
+      "refused_correctly": true
+    },
+    "silent_failure": false,
+    "over_clarified": false
+  },
+  "B16": {
+    "set": "B",
+    "steps": {
+      "intent": true,
+      "slots": true,
+      "actions": true,
+      "readback_clean": true,
+      "sent_clean": true,
+      "state": true
+    },
+    "silent_failure": false,
+    "over_clarified": false
+  },
+  "B17": {
+    "set": "B",
+    "steps": {
+      "intent": true,
+      "actions": true,
+      "event_times": false,
+      "corrections": false,
+      "readback": false,
+      "state": true
+    },
+    "silent_failure": true,
+    "over_clarified": false
+  },
+  "C1": {
+    "set": "C",
+    "steps": {
+      "idempotent_rerun": true,
+      "state": true
+    },
+    "silent_failure": false,
+    "over_clarified": false
+  },
+  "C2": {
+    "set": "C",
+    "steps": {
+      "actions": true,
+      "state": true
+    },
+    "silent_failure": false,
+    "over_clarified": false
+  },
+  "C3": {
+    "set": "C",
+    "steps": {
+      "actions": true,
+      "readback": true,
+      "honest_readback": true,
+      "state": true
+    },
+    "silent_failure": false,
+    "over_clarified": false
+  },
+  "C4": {
+    "set": "C",
+    "steps": {
+      "no_crash": true,
+      "no_writes": true
+    },
+    "silent_failure": false,
+    "over_clarified": false
+  },
+  "D1": {
+    "set": "D",
+    "steps": {
+      "intent": true,
+      "readback": true,
+      "readback_clean": true,
+      "no_writes": true
+    },
+    "silent_failure": false,
+    "over_clarified": false
+  },
+  "D2": {
+    "set": "D",
+    "steps": {
+      "intent": true,
+      "readback": true,
+      "no_writes": true
+    },
+    "silent_failure": false,
+    "over_clarified": false
+  },
+  "D3": {
+    "set": "D",
+    "steps": {
+      "intent": true,
+      "readback": true,
+      "no_writes": true
+    },
+    "silent_failure": false,
+    "over_clarified": false
+  },
+  "D4": {
+    "set": "D",
+    "steps": {
+      "intent": true,
+      "readback": true,
+      "no_writes": true
+    },
+    "silent_failure": false,
+    "over_clarified": false
+  }
+}

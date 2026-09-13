@@ -54,7 +54,7 @@ class Agent:
             self.traces.append(tr); return tr
 
         # 2. parse
-        subs, meta = parse(transcript, self.contacts, self.today)
+        subs, meta = parse(transcript, self.contacts, self.today, ablate=self.ablate)
         cleaned = meta.get("cleaned", transcript)
         corrections = meta.get("corrections", [])
 
