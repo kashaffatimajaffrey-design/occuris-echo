@@ -61,7 +61,7 @@ def readback_for(actions: list[Action], subs: list[SubIntent], confirm: bool = F
             if a.app == "calendar":
                 parts.append(f"That's already how it is — {s.title.value or s.recipient.value or 'that event'}. Nothing changed")
             else:
-                parts.append(f"I already sent that to {_who(s)} — not sending it again. Say “send another” if you want a second one")
+                parts.append(f"I already sent that to {_who(s)} — not sending it again")
         elif a.status == Status.failed:
             target = _who(s) if s.recipient.value else (s.title.value or "that")
             parts.append(f"{a.app.capitalize()} failed for {target} — {a.detail}")

@@ -324,6 +324,9 @@ class Agent:
                 ev = self.p.calendar_find(s.title.value or "")
                 if ev:
                     s.datetime = Slot(ev["start"][:10] + s.datetime.value[10:], Source.deterministic, 0.85, "time from utterance, date from existing event")
+                elif s.title.value and not s.question and s.clause != "__last__":
+                    s.question = f"I can't find an event called “{s.title.value}” on your calendar — which one do you mean?"
+                    s.datetime = Slot(None, Source.none, 0.0, "no event to take the date from")
         # a resolved NOTIFY contact with no channel on file needs a question, not a failed call;
         # one with email but no Slack gets an email instead
         for s in subs:
