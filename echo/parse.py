@@ -115,7 +115,7 @@ RENAME = re.compile(r"(?:it'?s\s+)?not\s+(?:a\s+|an\s+|the\s+)?([a-z][a-z ]*?),?
 def detect_intent(clause: str) -> Intent | None:
     c = clause.lower()
     if RENAME.search(c): return Intent.RENAME_EVENT
-    if re.search(r"\b(what'?s on|what is on|what do i (have|need)|did i|have i|is there)\b", c) or c.rstrip().endswith("?"):
+    if re.search(r"\b(what'?s on|what is on|what do i (have|need)|do i have|did i|have i|is there|am i free|any slots?|any time|when am i free|what times?|available)\b", c) or c.rstrip().endswith("?"):
         return Intent.QUERY
     if re.search(r"\b(reply|respond|write back)\b", c): return Intent.REPLY_EMAIL
     if re.search(r"\b(email|mail)\b", c): return Intent.SEND_EMAIL

@@ -454,15 +454,63 @@ class Agent:
         if "this week" in t or "need to do" in t:
             return self._week_digest()
         day = (s.datetime.value or self.today.isoformat())[:10]
-        evs = []
+        day_words = speak_when(day + "T00:00", day_only=True)
+        events = []
         for e in self.p.calendar_list(day):
             try:
-                evs.append(f"{e['title']} at {speak_when(e['start'], time_only=True)}")
+                st, en = datetime.fromisoformat(e["start"]), datetime.fromisoformat(e["end"])
+                events.append((st, en, e["title"]))
             except Exception:  # noqa: BLE001 — malformed event must not crash the answer
                 continue
-        if not evs:
-            return f"Nothing on your calendar {speak_when(day + 'T00:00', day_only=True)}."
-        return f"On {speak_when(day + 'T00:00', day_only=True)} you have: " + "; ".join(evs) + "."
+        events.sort()
+        # free-slot question?
+        if re.search(r"\b(free|slots?|available|open|when can i|any time)\b", t):
+            return self._free_slots(day, day_words, events, t)
+        if not events:
+            return f"Nothing on your calendar {day_words} — it's clear."
+        listed = "; ".join(f"{title} at {speak_when(st.isoformat(), time_only=True)}" for st, en, title in events)
+        return f"On {day_words} you have: {listed}."
+
+    EVENING = re.compile(r"\b(concert|dinner|drinks?|movie|film|show|party|gig|theatre|theater|night|evening|late)\b")
+    DAYTIME = re.compile(r"\b(coffee|brunch|breakfast|lunch|walk|gym|run|appointment|meeting|errand|shopping|morning|afternoon|daytime|class)\b")
+
+    def _free_slots(self, day: str, day_words: str, events, t: str) -> str:
+        """Free windows of an hour or more between 8am and 11pm, led by the half of the day that suits the activity."""
+        from datetime import timedelta
+        d0 = datetime.fromisoformat(day + "T08:00")
+        d1 = datetime.fromisoformat(day + "T23:00")
+        busy = [(max(st, d0), min(en, d1)) for st, en, _ in events if en > d0 and st < d1]
+        free, cursor = [], d0
+        for st, en in sorted(busy):
+            if st - cursor >= timedelta(hours=1):
+                free.append((cursor, st))
+            cursor = max(cursor, en)
+        if d1 - cursor >= timedelta(hours=1):
+            free.append((cursor, d1))
+        if not free:
+            return f"{day_words} is fully booked between 8 am and 11 pm — nothing an hour long is free."
+        split = datetime.fromisoformat(day + "T17:00")
+        daytime = [(a, min(b, split)) for a, b in free if a < split and min(b, split) - a >= timedelta(hours=1)]
+        evening = [(max(a, split), b) for a, b in free if b > split and b - max(a, split) >= timedelta(hours=1)]
+        say = lambda ws: ", ".join(f"{speak_when(a.isoformat(), time_only=True)} to {speak_when(b.isoformat(), time_only=True)}" for a, b in ws)
+        activity = re.search(r"\bfor (?:a |an |the )?([a-z]+)", t)
+        act = activity.group(1) if activity else None
+        if self.EVENING.search(t):
+            lead, other, lead_name, other_name = evening, daytime, "in the evening", "during the day"
+        elif self.DAYTIME.search(t):
+            lead, other, lead_name, other_name = daytime, evening, "during the day", "in the evening"
+        else:
+            allw = say(free)
+            return f"{day_words}, you're free {allw}."
+        what = f" for {act}" if act else ""
+        if lead:
+            out = f"{day_words}{what}, you're free {lead_name}: {say(lead)}."
+            if other:
+                out += f" If you'd rather go {other_name}, there's also {say(other)}."
+            return out
+        if other:
+            return f"{day_words}, nothing {lead_name} is free{what}, but {other_name} you have {say(other)}."
+        return f"{day_words} has no free hour {lead_name} or {other_name}."
 
     def _week_digest(self) -> str:
         items, flagged = [], []

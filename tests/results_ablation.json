@@ -460,5 +460,49 @@
     },
     "silent_failure": false,
     "over_clarified": false
+  },
+  "A10": {
+    "set": "A",
+    "steps": {
+      "intent": true,
+      "actions": true,
+      "readback": true,
+      "no_writes": true
+    },
+    "silent_failure": false,
+    "over_clarified": false
+  },
+  "A11": {
+    "set": "A",
+    "steps": {
+      "intent": true,
+      "actions": true,
+      "readback": true,
+      "no_writes": true
+    },
+    "silent_failure": false,
+    "over_clarified": false
+  },
+  "A12": {
+    "set": "A",
+    "steps": {
+      "intent": true,
+      "actions": true,
+      "readback": true,
+      "no_writes": true
+    },
+    "silent_failure": false,
+    "over_clarified": false
+  },
+  "A13": {
+    "set": "A",
+    "steps": {
+      "intent": true,
+      "actions": true,
+      "readback": true,
+      "no_writes": true
+    },
+    "silent_failure": false,
+    "over_clarified": false
   }
 }

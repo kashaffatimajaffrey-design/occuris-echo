@@ -1,6 +1,6 @@
 # Occuris Echo — system & reliability brief
 
-**40 of 40 known-answer cases pass. 0 silent failures. 0 over-clarifications. With the deterministic layer disabled: 3 silent failures.**
+**44 of 44 known-answer cases pass. 0 silent failures. 0 over-clarifications. With the deterministic layer disabled: 3 silent failures.**
 
 ## Who it's for, and why reliability is the product
 
@@ -22,11 +22,11 @@ voice / text → parse (rules first, model tagged) → gate → providers (twins
 
 ## How we know it works
 
-**Known-answer harness**, 40 cases, each scored per step (intent · slots · gate · actions · read-back) against **twin state** — sent-mail counts, event counts, Slack posts, ledger rows — never against what the agent claims.
+**Known-answer harness**, 44 cases, each scored per step (intent · slots · gate · actions · read-back) against **twin state** — sent-mail counts, event counts, Slack posts, ledger rows — never against what the agent claims.
 
 | Set | Cases | Pass | Silent | Silent (ablation) |
 |---|---|---|---|---|
-| A clean | 9 | 9 | 0 | 0 |
+| A clean | 13 | 13 | 0 | 0 |
 | B adversarial | 23 | 23 | 0 | 3 |
 | C infra | 4 | 4 | 0 | 0 |
 | D read-side | 4 | 4 | 0 | 0 |

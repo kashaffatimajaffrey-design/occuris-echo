@@ -1,4 +1,4 @@
-## Results — 40/40 cases pass
+## Results — 44/44 cases pass
 
 - **Silent failures: 0** (acted confidently and wrongly, or claimed done for a non-done action)
 - **Over-clarifications (A-set): 0** — the agent asked when it should have acted
@@ -6,7 +6,7 @@
 
 | Set | Cases | Pass | Silent failures | Silent (ablation) |
 |---|---|---|---|---|
-| A | 9 | 9 | 0 | 0 |
+| A | 13 | 13 | 0 | 0 |
 | B | 23 | 23 | 0 | 3 |
 | C | 4 | 4 | 0 | 0 |
 | D | 4 | 4 | 0 | 0 |
@@ -15,7 +15,7 @@
 
 | Step | Correct | Of |
 |---|---|---|
-| actions | 29 | 29 |
+| actions | 33 | 33 |
 | conflict | 1 | 1 |
 | corrections | 1 | 1 |
 | event_times | 3 | 3 |
@@ -23,13 +23,13 @@
 | honest_readback | 1 | 1 |
 | idempotent_rerun | 1 | 1 |
 | injection | 1 | 1 |
-| intent | 33 | 33 |
+| intent | 37 | 37 |
 | no_crash | 1 | 1 |
-| no_writes | 23 | 23 |
+| no_writes | 27 | 27 |
 | pending | 1 | 1 |
 | question | 7 | 7 |
 | question_first | 1 | 1 |
-| readback | 26 | 26 |
+| readback | 30 | 30 |
 | readback_clean | 2 | 2 |
 | refused_correctly | 11 | 11 |
 | sent_clean | 1 | 1 |
