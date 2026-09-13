@@ -126,7 +126,7 @@ def detect_intent(clause: str) -> Intent | None:
     if polite:
         c = c[polite.end():]
     has_verb = re.search(r"\b(reply|respond|email|mail|send|tell|text|message|notify|ping|put|add|schedule|book|move|reschedule|change|edit|fix|correct|update|rename|delete|remove|remind)\b", c)
-    if re.search(r"\b(what'?s on|what is on|what do i (have|need)|do i have|did i|have i|is there|am i free|any slots?|any time|when am i free|what times?|available|tell me if|let me know if|tell me when|look at my (schedule|calendar|week|day)|check my (schedule|calendar)|see if i(?:'m| am) free|when (do|will) i have|when i have (time|a slot))\b", c) \
+    if re.search(r"\b(what'?s on|what is on|what do i (have|need)|do i have|did i|have i|is there|am i free|any slots?|any time|when am i free|what times?|available|tell me if|let me know if|tell me when|look at my (schedule|calendar|week|day)|check my (schedule|calendar)|see if i(?:'m| am) free|when (do|will) i have|when i have (time|a slot)|i'?m free|i am free)\b", c) \
             or (c.rstrip().endswith("?") and not has_verb):
         return Intent.QUERY
     if re.search(r"\b(reply|respond|write back)\b", c): return Intent.REPLY_EMAIL
@@ -147,14 +147,15 @@ def detect_intent(clause: str) -> Intent | None:
     return None
 
 
-RECIP = re.compile(r"\b(?:reply to|respond to|email|mail|tell|text|message|notify|ping|send|let)\s+(?:(?:it|this|that|these|the details|the invite)\s+to\s+)?(?:to\s+)?((?:dr\.?\s+|doctor\s+)?[a-z][a-z.]*(?:\s+[a-z][a-z.]*)?)", re.I)
-MSG_SAY = re.compile(r"\b(?:that|saying|say|:)\s+(.+)$", re.I)
+RECIP = re.compile(r"\b(?:reply to|respond to|email|mail|tell|text|message|notify|ping|send|let)\s+(?:(?:a|an|the)\s+(?:message|note|email|text|mail|reminder)\s+to\s+|(?:it|this|that|these|the details|the invite)\s+to\s+)?(?:to\s+)?((?:dr\.?\s+|doctor\s+)?[a-z][a-z.]*(?:\s+[a-z][a-z.]*)?)", re.I)
+MSG_SAY = re.compile(r"\b(?:that|saying|say|:|about|regarding)\s+(.+)$", re.I)
 
 
 def extract_recipient(clause: str, contacts: Contacts) -> tuple[Slot, list[dict], str]:
+    clause = re.sub(r"\b(reply to|email|tell|send)\s+\1\b", r"\1", clause, flags=re.I)   # "reply to reply to X" (a restart)
     m = RECIP.search(clause)
     if not m:
-        return Slot(None, Source.none), [], "no recipient phrase"
+        return Slot(None, Source.none), [], ""
     mention = re.sub(r"\s+(as well|as|too|also|please|about it|about this)\s*$", "", m.group(1), flags=re.I)
     rel = re.match(r"my\s+(sister|brother|mum|mom|dad|wife|husband|partner)\b", mention, re.I)
     if rel:
@@ -183,7 +184,9 @@ def extract_message(clause: str) -> Slot:
         return Slot(None, Source.none)
     msg = m.group(1).strip(" .")
     msg = re.sub(r"^(that|saying|say)\s+", "", msg, flags=re.I)
-    return Slot(msg, Source.deterministic, 0.9, "after say/that/colon")
+    if re.search(r"\b(about|regarding)\s+" + re.escape(msg) + r"$", clause, re.I):
+        msg = "About " + msg
+    return Slot(msg, Source.deterministic, 0.9, "after say/that/colon/about")
 
 
 VAGUE = {"something", "thing", "a thing", "an event", "event", "it", "that", "this", "them", "stuff", "an appointment", "appointment", "a meeting"}
@@ -249,6 +252,15 @@ def split_clauses(text: str) -> list[str]:
             fwd.append(frag)
     text = ". ".join(fwd)
     parts = [p.strip(" ,.") for p in CLAUSE_SPLIT.split(text) if p and p.strip(" ,.")]
+    # ", my sister, about my appointment" — appositives and "about…" belong to the clause before them
+    merged: list[str] = []
+    for part in parts:
+        if merged and (re.match(r"^(about|regarding|re|saying|that|who|which|my (sister|brother|mum|mom|dad))\b", part, re.I)
+                       or (len(part.split()) <= 2 and not re.search(r"\d", part) and not detect_intent(part))):
+            merged[-1] = merged[-1] + ", " + part
+        else:
+            merged.append(part)
+    parts = merged
     # "at 7:00 PM I need to go for dinner" — clause starting with a time still belongs to a new event
     return parts or [text]
 
@@ -359,6 +371,14 @@ def parse(transcript: str, contacts: Contacts, today: datetime, ablate: bool = F
         # a fragment that is only a time ("4:00 PM", "at 3") or only a day ("Wednesday") fills the previous event
         only_time = re.fullmatch(r"\s*(?:at\s+|on\s+)?\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)?\s*", cl, re.I)
         only_day = re.fullmatch(r"\s*(?:on\s+)?(?:next\s+)?(?:" + "|".join(WEEKDAYS) + r"|tomorrow|today)\s*(?:with\s+[a-z .]+)?", cl, re.I)
+        if intent == Intent.RENAME_EVENT and subs and any(x.intent == Intent.CREATE_EVENT for x in subs):
+            m_ci = re.search(r"\b(?:call it|name it|title it)\s+(?:a\s+|an\s+|the\s+)?(.+)$", cl, re.I)
+            if m_ci:
+                target = next(x for x in reversed(subs) if x.intent == Intent.CREATE_EVENT)
+                target.title = Slot(m_ci.group(1).strip(" ."), Source.deterministic, 0.9, "named in the same sentence")
+                if target.question and "call" in target.question:
+                    target.question = None
+                continue
         if intent is None and subs and subs[-1].intent == Intent.CREATE_EVENT and (only_time or only_day):
             prev = subs[-1]
             base = prev.datetime.value

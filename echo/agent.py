@@ -11,7 +11,7 @@ from datetime import datetime
 
 from .contacts import Contacts
 from .models import Action, Gate, Intent, Slot, Source, Status, SubIntent, Trace, idempotency_key
-from .parse import INJECTION, parse
+from .parse import INJECTION, WEEKDAYS, parse
 from .providers.base import ProviderError
 from .readback import readback_for, speak_when
 
@@ -98,14 +98,33 @@ class Agent:
         elif self._ctx and self._ctx["kind"] == "similar" and re.search(r"\b(different|another|separate|new one|add it|no)\b", transcript, re.I):
             asker = self._ctx["asker"]; asker.question = None; asker.conflict = None; asker.clause = "__force_create__"
             subs = self._ctx["subs"]; meta = {"cleaned": transcript, "corrections": []}
-        elif self._ctx and (not subs or len(transcript.split()) <= 4):
+        elif self._ctx and (not subs or len(transcript.split()) <= 4
+                            or (self._ctx["kind"] == "title" and len(subs) == 1 and subs[0].intent == Intent.RENAME_EVENT)):
             if self._ctx["kind"] == "title":
                 asker = self._ctx["asker"]
-                asker.title = Slot(_clean_title_answer(transcript), Source.deterministic, 0.9, "user named it when asked")
-                asker.question = None
-                subs = self._ctx["subs"]
+                given = next((x.title.value for x in subs if x.intent == Intent.RENAME_EVENT and x.title.value), None)
+                asker.title = Slot(given or _clean_title_answer(transcript), Source.deterministic, 0.9, "user named it when asked")
+                asker.question = None; self._answered = True
+                subs = [x for x in self._ctx["subs"] if x.intent != Intent.QUERY] or self._ctx["subs"]
                 meta = {"cleaned": self._ctx["text"] + " — " + transcript, "corrections": []}
-            else:
+            elif self._ctx["kind"] == "when":
+                from .parse import parse_when
+                when, amb = parse_when(re.sub(r"\b(works|is fine|is good|would be good|please)\b", "", transcript, flags=re.I), self.today)
+                asker = self._ctx["asker"]
+                if when.value and not amb:
+                    base = asker.datetime.value
+                    if base and "no-hour" in (asker.datetime.evidence or "") and "no-hour" not in (when.evidence or "") and not re.search(r"\b(" + "|".join(WEEKDAYS) + r"|tomorrow|today)\b", transcript, re.I):
+                        when = Slot(base[:10] + when.value[10:], Source.deterministic, 0.85, "time answered; day kept")
+                    asker.datetime = when
+                    asker.question = None; self._answered = True
+                    subs = [x for x in self._ctx["subs"] if x.intent != Intent.QUERY] or self._ctx["subs"]
+                    meta = {"cleaned": self._ctx["text"] + " — " + transcript, "corrections": []}
+                else:
+                    merged = self._merge_answer(transcript)
+                    if merged:
+                        transcript = merged
+                        subs, meta = parse(transcript, self.contacts, self.today, ablate=self.ablate)
+            elif self._ctx["kind"] != "when":
                 cands, _ = self.contacts.resolve(transcript.strip(" ."))
                 if len(cands) == 1 and self._ctx["kind"] != "who":
                     needy = next((x for x in self._ctx["subs"] if x.intent in (Intent.REPLY_EMAIL, Intent.SEND_EMAIL, Intent.NOTIFY) and not x.recipient.value), None)
@@ -113,13 +132,14 @@ class Agent:
                         self._ctx["kind"] = "who"; self._ctx["asker"] = needy
                 merged = self._merge_answer(transcript)
                 if merged:
-                    transcript = merged
+                    transcript = merged; self._answered = True
                     subs, meta = parse(transcript, self.contacts, self.today, ablate=self.ablate)
         dropped = None
-        if self._ctx and subs and any(x.intent != Intent.QUERY for x in subs) and len(transcript.split()) > 4:
+        if self._ctx and not getattr(self, "_answered", False) and subs and any(x.intent != Intent.QUERY for x in subs) and len(transcript.split()) > 4:
             a0 = self._ctx["asker"]
             dropped = a0.title.value or a0.recipient.value or a0.clause[:30]
         self._ctx = None
+        self._answered = False
         cleaned = meta.get("cleaned", transcript)
         corrections = meta.get("corrections", [])
 
@@ -287,6 +307,12 @@ class Agent:
                         s.channel = Slot("email", Source.deterministic, 0.8, "no Slack on file; email instead")
                     else:
                         s.question = f"How should I reach {_short(s.recipient.value)}? I don't have a channel on file."
+        for s in subs:
+            if s.intent == Intent.SEND_EMAIL and s.recipient.value and not s.question:
+                row = self._contact(s.recipient.value)
+                if row is not None and not row.get("email") and row.get("slack"):
+                    s.intent = Intent.NOTIFY
+                    s.channel = Slot("slack", Source.deterministic, 0.8, "no email on file; Slack instead")
         # 5. clarifications — one question, the most blocking
         q = next((s.question for s in subs if s.question), None)
         if q:
@@ -682,7 +708,7 @@ class Agent:
         if note:
             tr.readback = note + tr.readback; self._note = None
         if dropped:
-            tr.readback = tr.readback.rstrip(".") + f". I've let go of the earlier unfinished one about {dropped} — say it again if you still want it."
+            tr.readback = tr.readback.rstrip(".") + f". (I dropped the earlier unfinished request about {dropped}.)"
         if prior_pending and tr.intent != Intent.CLARIFY:
             still = "; ".join(f"the {r['app']} {r['op']} to {r.get('recipient') or r.get('title')}" for r in prior_pending)
             tr.readback = tr.readback.rstrip(".") + f". Also, I'm still waiting on your yes for {still} — send it?"
