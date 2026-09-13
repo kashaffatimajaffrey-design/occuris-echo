@@ -19,11 +19,12 @@ GARBAGE = re.compile(r"\[(static|unintelligible|inaudible|noise)\]", re.I)
 SENSITIVE = re.compile(r"\b(password|passcode|pin|otp|cvv|card number|social security|ssn)\b", re.I)
 INJECTION = re.compile(r"(ignore (all |any )?(prior|previous) instructions|forward (this )?(thread|email) to all|ai assistant:|system:)", re.I)
 
-CLAUSE_SPLIT = re.compile(r"(?<![Dd]r)(?<![Mm]r)(?<![Mm]s)(?<![Mm]rs)(?<![Ss]t)\.\s+|,\s*(?:and\s+)?|\s+and then\s+|\s+then\s+|\s+and\s+(?=(?:tell|put|add|email|reply|send|move|remind|text|message|notify|at\s+\d|my\s+(?:sister|brother)|(?:on|for)\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow)|tomorrow|next\s+week))", re.I)
+CLAUSE_SPLIT = re.compile(r"(?<![Dd]r)(?<![Mm]r)(?<![Mm]s)(?<![Mm]rs)(?<![Ss]t)\.\s+(?!\d{1,2}(?::\d{2})?\s*(?:am|pm)\b)|,\s*(?:and\s+)?(?!\d{1,2}(?::\d{2})?\s*(?:am|pm)\b)|\s+and then\s+|\s+then\s+|\s+and\s+(?=(?:tell|put|add|email|reply|send|move|remind|text|message|notify|at\s+\d|my\s+(?:sister|brother)|(?:on|for)\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow)|tomorrow|next\s+week))", re.I)
 
 
 def strip_disfluencies(text: str) -> str:
-    t = re.sub(DISFLUENCIES, " ", text, flags=re.I)
+    t = re.sub(r"\be-?mail\b", "email", text, flags=re.I)
+    t = re.sub(DISFLUENCIES, " ", t, flags=re.I)
     t = re.sub(r"\s+", " ", t).strip(" ,.")
     return t
 
@@ -112,7 +113,7 @@ def parse_when(text: str, today: datetime) -> tuple[Slot, bool]:
 RENAME = re.compile(r"(?:it'?s\s+)?not\s+(?:a\s+|an\s+|the\s+)?([a-z][a-z ]*?),?\s+(?:it'?s\s+)?(?:supposed to be\s+|meant to be\s+|should be\s+)?(?:a\s+|an\s+|the\s+)?([a-z][a-z ]*?)(?:\s*$|[.,])|\b(?:call it|rename it to|name it|change (?:the )?(?:name|title) to)\s+(?:a\s+|an\s+|the\s+)?([a-z][a-z ]*?)\s*$|\brename\s+(?:the\s+)?([a-z][a-z ]*?)\s+to\s+(?:a\s+|an\s+|the\s+)?([a-z][a-z ]*?)\s*$", re.I)
 
 
-EVENT_NOUNS = r"(lunch|dinner|brunch|breakfast|coffee|meeting|appointment|call|check-?up|dentist|doctor|physio|gym|class|interview|flight|train|party|concert|movie|date|visit|session|lesson|standup|review|catch-?up|luncheon|drinks|workout)"
+EVENT_NOUNS = r"(lunch|dinner|brunch|breakfast|coffee|meeting|appointment|call|check-?up|dentist|physio|gym|class|interview|flight|train|party|concert|movie|date|visit|session|lesson|standup|review|catch-?up|luncheon|drinks|workout|spa)"
 
 
 def detect_intent(clause: str) -> Intent | None:
@@ -237,7 +238,13 @@ def split_clauses(text: str) -> list[str]:
             joined[-1] = joined[-1] + " " + re.sub(r"^(and|so|also|then)\s+", "", frag, flags=re.I)
         else:
             joined.append(frag)
-    text = ". ".join(joined)
+    fwd: list[str] = []
+    for frag in joined:
+        if fwd and len(fwd[-1].split()) <= 2 and not re.search(r"\d", fwd[-1]) and re.match(r"^(book|put|add|schedule|remind|email|tell)\b", fwd[-1], re.I):
+            fwd[-1] = fwd[-1] + " " + frag
+        else:
+            fwd.append(frag)
+    text = ". ".join(fwd)
     parts = [p.strip(" ,.") for p in CLAUSE_SPLIT.split(text) if p and p.strip(" ,.")]
     # "at 7:00 PM I need to go for dinner" — clause starting with a time still belongs to a new event
     return parts or [text]
@@ -266,10 +273,24 @@ def parse(transcript: str, contacts: Contacts, today: datetime, ablate: bool = F
         si = SubIntent(intent=Intent.RENAME_EVENT, clause=cleaned)
         si.title = Slot(last[-1], Source.deterministic, 0.85, "rename phrase, last version") if last else Slot(None, Source.none)
         return [si], meta
+    # "I don't want Dr. Anita Patel, it's actually Ravi Patel" — a person correction
+    pm = re.search(r"\b(?:it'?s actually\s+|actually it'?s\s+|not\s+(?:with\s+)?(?:dr\.?\s+|doctor\s+)?[a-z]+(?:\s+[a-z]+)?,?\s+(?:it'?s\s+)?(?:actually\s+)?)((?:dr\.?\s+|doctor\s+)?[a-z]+(?:\s+[a-z]+)?)", lc)
+    if pm:
+        pc, _ = contacts.resolve(pm.group(1))
+        if len(pc) == 1:
+            si = SubIntent(intent=Intent.SEND_EMAIL, clause="__correct_person__")
+            si.recipient = Slot(pc[0]["name"], Source.deterministic, 0.9, "corrected person")
+            return [si], meta
     rm = RENAME.search(lc)
     if rm and not re.search(r"\b(reply|email|tell|put|add|schedule|book)\b", lc):
         new_title = (rm.group(2) or rm.group(3) or rm.group(5) or "").strip()
         old_title = (rm.group(1) or rm.group(4) or "").strip()
+        if new_title.split()[0] in WEEKDAYS or new_title in ("tomorrow", "today"):
+            si = SubIntent(intent=Intent.UPDATE_EVENT, clause="__last__")
+            when, _ = parse_when(new_title, today)
+            si.datetime = when
+            si.title = Slot(None, Source.none)
+            return [si], meta
         # "call it spade. spa day" — the words after a sentence break are the correction; last version wins
         tail = cleaned.lower()[rm.end():].strip(" .,")
         if tail and not old_title:
@@ -297,6 +318,45 @@ def parse(transcript: str, contacts: Contacts, today: datetime, ablate: bool = F
     carry_when: Slot | None = None
     for cl in clauses:
         intent = detect_intent(cl)
+        # "I want to do it with Doctor Patel" — a clause that names a person carries them forward
+        wm0 = re.search(r"\bwith\s+((?:dr\.?\s+|doctor\s+)?[a-z]+(?:\s+[a-z]+)?)", cl, re.I)
+        if wm0 and intent is None:
+            wc0, _ = contacts.resolve(wm0.group(1))
+            if len(wc0) == 1:
+                carry_recipient = Slot(wc0[0]["name"], Source.deterministic, 0.8, "mentioned with the event")
+                if subs and subs[-1].intent == Intent.CREATE_EVENT and subs[-1].title.value and " with " not in subs[-1].title.value:
+                    subs[-1].title = Slot(f"{subs[-1].title.value} with {wc0[0]['name'].split(' (')[0]}", Source.deterministic, 0.8, "event + person")
+                continue
+        # a fragment that is only a time ("4:00 PM", "at 3") or only a day ("Wednesday") fills the previous event
+        only_time = re.fullmatch(r"\s*(?:at\s+|on\s+)?\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)?\s*", cl, re.I)
+        only_day = re.fullmatch(r"\s*(?:on\s+)?(?:next\s+)?(?:" + "|".join(WEEKDAYS) + r"|tomorrow|today)\s*(?:with\s+[a-z .]+)?", cl, re.I)
+        if intent is None and subs and subs[-1].intent == Intent.CREATE_EVENT and (only_time or only_day):
+            prev = subs[-1]
+            base = prev.datetime.value
+            if only_time:
+                when, _ = parse_when(cl, today)
+                if when.value:
+                    day_part = base[:10] if base else when.value[:10]
+                    prev.datetime = Slot(day_part + when.value[10:], Source.deterministic, 0.85, "time from the next fragment")
+            else:
+                when, amb = parse_when(cl, today)
+                if when.value:
+                    time_part = base[10:] if (base and "no-hour" not in (prev.datetime.evidence or "")) else "T00:00"
+                    ev = "day from the next fragment" + ("" if time_part != "T00:00" else "; no-hour")
+                    prev.datetime = Slot(when.value[:10] + time_part, Source.deterministic, 0.85, ev)
+                wm = re.search(r"\bwith\s+((?:dr\.?\s+|doctor\s+)?[a-z]+(?:\s+[a-z]+)?)", cl, re.I)
+                if wm:
+                    wc, _ = contacts.resolve(wm.group(1))
+                    if len(wc) == 1:
+                        carry_recipient = Slot(wc[0]["name"], Source.deterministic, 0.8, "mentioned with the event")
+                        if prev.title.value and " with " not in prev.title.value:
+                            prev.title = Slot(f"{prev.title.value} with {wc[0]['name'].split(' (')[0]}", Source.deterministic, 0.8, "event + person")
+            if prev.datetime.value and "no-hour" not in (prev.datetime.evidence or "") and prev.question and "time" in prev.question.lower():
+                prev.question = None
+            if prev.datetime.value and prev.question and "day and time" in prev.question and "no-hour" not in (prev.datetime.evidence or ""):
+                prev.question = None
+            carry_when = prev.datetime
+            continue
         if intent is None and subs and subs[-1].intent == Intent.CREATE_EVENT and not subs[-1].datetime.value \
                 and re.search(r"\b(do it|make it|have it|it|that)\b", cl.lower()) and re.search(r"\d|monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow|noon", cl.lower()):
             when, amb = parse_when(cl, today)
@@ -348,7 +408,14 @@ def parse(transcript: str, contacts: Contacts, today: datetime, ablate: bool = F
             carry_recipient = si.recipient
         elif intent == Intent.RENAME_EVENT:
             m = RENAME.search(cl.lower())
-            new_title = (m.group(2) or m.group(3) or "").strip()
+            new_title = (m.group(2) or m.group(3) or (m.group(5) if m.lastindex and m.lastindex >= 5 else "") or "").strip()
+            if new_title and (new_title.split()[0] in WEEKDAYS or new_title in ("tomorrow", "today")):
+                # "Not Wednesday, Thursday" — a date correction, never a rename
+                si = SubIntent(intent=Intent.UPDATE_EVENT, clause="__last__")
+                when, _ = parse_when(new_title, today)
+                si.datetime = when
+                subs.append(si)
+                continue
             si.title = Slot(new_title, Source.deterministic, 0.9, "rename phrase") if new_title else Slot(None, Source.none)
             if not new_title:
                 si.question = "What should I call it?"

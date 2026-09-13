@@ -540,5 +540,50 @@
     },
     "silent_failure": true,
     "over_clarified": false
+  },
+  "A16": {
+    "set": "A",
+    "steps": {
+      "intent": true,
+      "gate": true,
+      "actions": true,
+      "event_times": true,
+      "readback": true,
+      "readback_clean": true,
+      "state": true
+    },
+    "silent_failure": false,
+    "over_clarified": false
+  },
+  "A17": {
+    "set": "A",
+    "steps": {
+      "intent": true,
+      "actions": true,
+      "event_times": true,
+      "readback": true,
+      "state": true
+    },
+    "silent_failure": false,
+    "over_clarified": false
+  },
+  "B25": {
+    "set": "B",
+    "steps": {
+      "event_times": true,
+      "readback": true,
+      "state": true
+    },
+    "silent_failure": false,
+    "over_clarified": false
+  },
+  "B26": {
+    "set": "B",
+    "steps": {
+      "readback": true,
+      "state": true
+    },
+    "silent_failure": false,
+    "over_clarified": false
   }
 }

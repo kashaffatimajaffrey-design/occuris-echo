@@ -1243,6 +1243,107 @@
           "sent": 0
         }
       }
+    },
+    {
+      "id": "A16",
+      "set": "A",
+      "transcript": "I want to have lunch with the doctor, I want to do it with Doctor Patel. I want to do it on Friday, 4:00 PM. So can you e-mail this to him as well?",
+      "expect": {
+        "intent": "MULTI",
+        "gate": "CONFIRM_REQUIRED",
+        "actions": [
+          {
+            "app": "calendar",
+            "op": "create",
+            "status": "done"
+          },
+          {
+            "app": "gmail",
+            "op": "send",
+            "status": "pending"
+          }
+        ],
+        "readback_has": [
+          "Dr. Anita Patel",
+          "Friday",
+          "4 pm"
+        ],
+        "readback_not": [
+          "Sunday",
+          "None"
+        ],
+        "state": {
+          "events": 1,
+          "sent": 0
+        },
+        "event_times": [
+          "16:00"
+        ]
+      }
+    },
+    {
+      "id": "A17",
+      "set": "A",
+      "transcript": "Book me. For lunch on 3:00 PM. Wednesday with doctor Ravi Patel.",
+      "expect": {
+        "intent": "CREATE_EVENT",
+        "actions": [
+          {
+            "app": "calendar",
+            "op": "create",
+            "status": "done"
+          }
+        ],
+        "readback_has": [
+          "lunch",
+          "Wednesday",
+          "3 pm"
+        ],
+        "state": {
+          "events": 1
+        },
+        "event_times": [
+          "15:00"
+        ]
+      }
+    },
+    {
+      "id": "B25",
+      "set": "B",
+      "turns": [
+        "Put dentist on Sunday at 4",
+        "Not Sunday. Friday."
+      ],
+      "expect": {
+        "readback_has": [
+          "Friday",
+          "4 pm"
+        ],
+        "state": {
+          "events": 1
+        },
+        "event_times": [
+          "16:00"
+        ]
+      }
+    },
+    {
+      "id": "B26",
+      "set": "B",
+      "turns": [
+        "Email Dr. Patel: lunch Friday at 3?",
+        "yes",
+        "I don't want Dr. Anita Patel, it's actually Ravi Patel"
+      ],
+      "expect": {
+        "readback_has": [
+          "can't unsend",
+          "Ravi Patel"
+        ],
+        "state": {
+          "sent": 1
+        }
+      }
     }
   ]
 }

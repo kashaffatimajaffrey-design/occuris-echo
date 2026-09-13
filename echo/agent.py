@@ -79,13 +79,21 @@ class Agent:
             tr = Trace(run_id, transcript, transcript, Intent.QUERY, subs, Gate.AUTO_OK, [], rb, question=asker.question)
             self.traces.append(tr); self._ctx = ctx
             return tr
-        if self._ctx and self._ctx["kind"] == "similar" and re.match(r"^\s*(same|yes|yeah|it'?s the same|the same|update it|merge)", transcript, re.I):
+        if self._ctx and self._ctx["kind"] in ("similar", "when", "title") and subs and len(subs) == 1 and subs[0].intent == Intent.UPDATE_EVENT and subs[0].clause == "__last__" and subs[0].datetime.value:
+            # "Not Wednesday, Thursday" while a question about a not-yet-created event is open: move that event's day
+            asker = self._ctx["asker"]
+            old_dt = asker.datetime.value or "T12:00"
+            asker.datetime = Slot(subs[0].datetime.value[:10] + old_dt[10:], Source.deterministic, 0.85, "day corrected before adding")
+            asker.question = None; asker.conflict = None
+            subs = self._ctx["subs"]; meta = {"cleaned": transcript, "corrections": []}
+            self._ctx = None
+        elif self._ctx and self._ctx["kind"] == "similar" and re.search(r"\b(same|update it|merge)\b", transcript, re.I) and not re.search(r"\b(different|another|separate|new)\b", transcript, re.I):
             asker = self._ctx["asker"]
             s_upd = SubIntent(intent=Intent.UPDATE_EVENT, clause=asker.conflict)
             s_upd.title = asker.title; s_upd.datetime = asker.datetime
             s_upd.recipient = Slot(asker.conflict, Source.deterministic, 0.9, "existing event id")
             subs = [s_upd]; meta = {"cleaned": transcript, "corrections": []}
-        elif self._ctx and self._ctx["kind"] == "similar" and re.match(r"^\s*(different|no|new|add it|another|separate)", transcript, re.I):
+        elif self._ctx and self._ctx["kind"] == "similar" and re.search(r"\b(different|another|separate|new one|add it|no)\b", transcript, re.I):
             asker = self._ctx["asker"]; asker.question = None; asker.conflict = None; asker.clause = "__force_create__"
             subs = self._ctx["subs"]; meta = {"cleaned": transcript, "corrections": []}
         elif self._ctx and (not subs or len(transcript.split()) <= 4):
@@ -138,7 +146,9 @@ class Agent:
             self._ablate(subs)
 
         # 4. queries — including "I want to book lunch… am I free this week?": answer, keep the lunch open
-        if any(s.intent == Intent.QUERY for s in subs) and any(s.intent == Intent.CREATE_EVENT and not s.datetime.value for s in subs):
+        def _no_time(x):
+            return not x.datetime.value or "no-hour" in (x.datetime.evidence or "")
+        if any(s.intent == Intent.QUERY for s in subs) and any(s.intent == Intent.CREATE_EVENT and _no_time(s) for s in subs):
             qsub = next(s for s in subs if s.intent == Intent.QUERY)
             csub = next(s for s in subs if s.intent == Intent.CREATE_EVENT)
             rb = self._answer_query(qsub, transcript)
@@ -178,6 +188,35 @@ class Agent:
                     s.datetime = Slot(last.get("datetime"), Source.deterministic, 0.9, "the event just created")
                     s.clause = last["event_id"]
                     s.recipient = Slot(last.get("title"), Source.deterministic, 0.9, "old title")
+        # person correction after the fact: we can't unsend an email — offer the same message to the right person, fix the event name
+        for s in list(subs):
+            if s.clause == "__correct_person__":
+                last_mail = next((r for r in reversed(self.p.ledger_rows()) if r.get("app") == "gmail" and r.get("status") == "done"), None)
+                wrong = last_mail.get("recipient") if last_mail else None
+                if not last_mail:
+                    s.intent = Intent.SEND_EMAIL; s.question = f"What should I send {s.recipient.value}?"
+                    continue
+                s.message = Slot(last_mail.get("message") or last_mail.get("readback", "").split("“")[-1].rstrip("”"), Source.deterministic, 0.8, "same message as the one already sent")
+                s.clause = ""
+                ev = next((e for e in self.p.calendar_upcoming() if wrong and _short(wrong).lower() in (e.get("title") or "").lower()), None)
+                if ev:
+                    r = SubIntent(intent=Intent.RENAME_EVENT, clause=ev["id"])
+                    r.title = Slot((ev["title"] or "").replace(_short(wrong), _short(s.recipient.value)), Source.deterministic, 0.85, "person corrected")
+                    r.recipient = Slot(ev["title"], Source.deterministic, 0.9, "old title")
+                    r.datetime = Slot(ev["start"], Source.deterministic, 0.9)
+                    subs.append(r)
+                self._note = f"I already emailed {_short(wrong)} — I can't unsend that. "
+        # "Not Sunday, Friday." — move the event just created to the corrected day
+        for s in subs:
+            if s.intent == Intent.UPDATE_EVENT and s.clause == "__last__":
+                last = next((r for r in reversed(self.p.ledger_rows()) if r.get("app") == "calendar" and r.get("status") == "done" and r.get("event_id")), None)
+                if not last or not s.datetime.value:
+                    s.question = "Which event should I move, and to when?"
+                else:
+                    old_time = (last.get("datetime") or "T09:00")[10:]
+                    s.datetime = Slot(s.datetime.value[:10] + old_time, Source.deterministic, 0.85, "day corrected, time kept")
+                    s.title = Slot(last.get("title"), Source.deterministic, 0.9, "the event just created")
+                    s.recipient = Slot(last["event_id"], Source.deterministic, 0.9, "existing event id")
         # UPDATE_EVENT phrased as delete: we never delete — say so and offer to change it instead
         for s in subs:
             if s.intent == Intent.UPDATE_EVENT and re.search(r"\b(delete|remove|get rid of|cancel the)\b", transcript, re.I):
@@ -536,8 +575,12 @@ class Agent:
                 except Exception:  # noqa: BLE001
                     continue
             name = datetime.fromisoformat(d + "T00:00").strftime("%A")
+            want_slots = re.search(r"\b(time|times|slots?|when)\b", t)
             if not evs:
-                out.append(f"{name} is clear")
+                out.append(f"{name} is clear" + (" all day" if want_slots else ""))
+            elif want_slots:
+                busy = ", ".join(f"{ti} at {speak_when(st.isoformat(), time_only=True)}" for st, ti in sorted(evs))
+                out.append(f"{name}: free except {busy}")
             else:
                 out.append(f"{name} has " + ", ".join(f"{ti} at {speak_when(st.isoformat(), time_only=True)}" for st, ti in sorted(evs)))
         lead = "This week: " + "; ".join(out) + "."
@@ -620,6 +663,9 @@ class Agent:
                     s.question = None
 
     def _finish(self, tr: Trace, prior_pending, dropped: str | None = None) -> Trace:
+        note = getattr(self, "_note", None)
+        if note:
+            tr.readback = note + tr.readback; self._note = None
         if dropped:
             tr.readback = tr.readback.rstrip(".") + f". I've let go of the earlier unfinished one about {dropped} — say it again if you still want it."
         if prior_pending and tr.intent != Intent.CLARIFY:

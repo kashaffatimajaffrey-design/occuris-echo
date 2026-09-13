@@ -26,8 +26,8 @@ voice / text → parse (rules first, model tagged) → gate → providers (twins
 
 | Set | Cases | Pass | Silent | Silent (ablation) |
 |---|---|---|---|---|
-| A clean | 13 | 13 | 0 | 0 |
-| B adversarial | 23 | 23 | 0 | 3 |
+| A clean | 17 | 17 | 0 | 0 |
+| B adversarial | 26 | 26 | 0 | 3 |
 | C infra | 4 | 4 | 0 | 0 |
 | D read-side | 4 | 4 | 0 | 0 |
 
