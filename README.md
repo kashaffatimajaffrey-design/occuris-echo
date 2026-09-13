@@ -2,7 +2,7 @@
 
 **A voice-first agent for people with motor or vision impairments. One sentence → Gmail, Google Calendar, Slack and a Google Sheets ledger → the agent tells you exactly what it did.**
 
-> **Demo video:** https://www.loom.com/share/413c0668620e448c8b2e869cd1f1176e
+> **Demo video:** https://www.loom.com/share/6bd1cf3edd624f7abde12051eb732f79
 > **Results:** 57/57 known-answer cases pass · **0 silent failures** · 0 over-clarifications · with the deterministic layer disabled: **3 silent failures** → [RESULTS.md](RESULTS.md)
 
 Built solo in the Multi-App AI Agent Hackathon window, 13 September 2026. Spec and test fixtures were written in advance; all code was written during the event.
