@@ -1,6 +1,6 @@
 # Occuris Echo — system & reliability brief
 
-**55 of 55 known-answer cases pass. 0 silent failures. 0 over-clarifications. With the deterministic layer disabled: 3 silent failures.**
+**57 of 57 known-answer cases pass. 0 silent failures. 0 over-clarifications. With the deterministic layer disabled: 3 silent failures.**
 
 ## Who it's for, and why reliability is the product
 

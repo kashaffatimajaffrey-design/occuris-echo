@@ -63,7 +63,9 @@ def parse_when(text: str, today: datetime) -> tuple[Slot, bool]:
     """Returns (slot, ambiguous_next_weekday). 'next Thursday' said on a Thursday is ambiguous."""
     t = text.lower()
     # word numbers after "at": "at ten", "at two o'clock"
-    t = re.sub(r"\b(at|on|around|by|about)\s+(" + "|".join(WORD_NUM) + r")\b(?=\s*(?:am|pm|o'?clock|$|\s|,|\.))", lambda m: m.group(1) + " " + str(WORD_NUM[m.group(2)]), t)
+    t = re.sub(r"\b(at|on|around|by|about|to)\s+(" + "|".join(WORD_NUM) + r")\b(?=\s*(?:am|pm|o'?clock|$|\s|,|\.))", lambda m: m.group(1) + " " + str(WORD_NUM[m.group(2)]), t)
+    # "from 1 pm to 2 pm" — the target is the second time
+    t = re.sub(r"\bfrom\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?\s+to\s+(?=\d)", "to ", t)
     t = re.sub(r"\b(" + "|".join(WORD_NUM) + r")\s*(am|pm|a\.m\.|p\.m\.)\b", lambda m: str(WORD_NUM[m.group(1)]) + " " + m.group(2), t)
     t = re.sub(r"\b(" + "|".join(WORD_NUM) + r")\s+o'?clock\b", lambda m: str(WORD_NUM[m.group(1)]), t)
     t = re.sub(r"\bo'?clock\b", "", t)
@@ -125,7 +127,7 @@ def detect_intent(clause: str) -> Intent | None:
     polite = re.match(r"^\s*(?:so\s+)?(?:can|could|would|will)\s+you\s+(?:please\s+)?|^\s*please\s+", c)
     if polite:
         c = c[polite.end():]
-    has_verb = re.search(r"\b(reply|respond|email|mail|send|tell|text|message|notify|ping|put|add|schedule|book|move|reschedule|change|edit|fix|correct|update|rename|delete|remove|remind)\b", c)
+    has_verb = re.search(r"\b(reply|respond|email|mail|send|tell|text|message|notify|ping|put|add|schedule|book|move|reschedule|change|edit|fix|correct|update|rename|delete|remove|remind|cancel|call off)\b", c)
     if re.search(r"\b(what'?s on|what is on|what do i (have|need)|do i have|did i|have i|is there|am i free|any slots?|any time|when am i free|what times?|available|tell me if|let me know if|tell me when|look at my (schedule|calendar|week|day)|check my (schedule|calendar)|see if i(?:'m| am) free|when (do|will) i have|when i have (time|a slot)|i'?m free|i am free|show me (my )?(schedule|calendar|week|day)|what'?s my (schedule|calendar|week|day)|my schedule for)\b", c) \
             or (c.rstrip().endswith("?") and not has_verb):
         return Intent.QUERY

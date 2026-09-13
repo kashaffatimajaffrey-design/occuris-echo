@@ -1436,6 +1436,44 @@
           "14:00"
         ]
       }
+    },
+    {
+      "id": "B29",
+      "set": "B",
+      "turns": [
+        "Book lunch with Ravi on Friday at 1",
+        "Move the lunch with Ravi from 1 pm to 2 pm",
+        "yes"
+      ],
+      "expect": {
+        "readback_has": [
+          "2 pm"
+        ],
+        "state": {
+          "events": 1
+        },
+        "event_times": [
+          "14:00"
+        ]
+      }
+    },
+    {
+      "id": "B30",
+      "set": "B",
+      "turns": [
+        "Put concert on Saturday at 7 pm",
+        "Email Ravi Patel that I'm late",
+        "Can you please cancel the concert?"
+      ],
+      "expect": {
+        "readback_has": [
+          "marked it cancelled"
+        ],
+        "state": {
+          "events": 1,
+          "sent": 0
+        }
+      }
     }
   ]
 }

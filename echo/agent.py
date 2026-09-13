@@ -52,7 +52,7 @@ class Agent:
         # 1. confirmation turn?
         if pend and YES.match(transcript):
             return self._execute_pending(run_id, transcript, pend)
-        if pend and NO.match(transcript) and len(transcript.split()) <= 3:
+        if pend and NO.match(transcript) and len(transcript.split()) <= 3 and not re.search(r"\b(cancel|call off)\s+(the|my)\b", transcript, re.I):
             for r in pend:
                 self.p.ledger_append({**r, "status": "cancelled", "ts": _now()})
             self._ctx = None
@@ -484,7 +484,16 @@ class Agent:
         app, op = _app(s), _op(s)
         if s.intent in (Intent.QUERY, Intent.CLARIFY, Intent.REFUSE):
             return Action(app, op, key, Status.not_attempted, detail="that part was a question, not an action")
-        if key in self._completed_keys():
+        dup = key in self._completed_keys()
+        if dup and s.intent == Intent.CREATE_EVENT:
+            prior = next((r for r in reversed(self.p.ledger_rows()) if r.get("idempotency_key") == key and r.get("status") == "done"), None)
+            try:
+                still_there = bool(prior and prior.get("event_id") and any(e["id"] == prior["event_id"] for e in self.p.calendar_upcoming()))
+            except Exception:  # noqa: BLE001 — if we can't check, trust the ledger
+                still_there = True
+            if not still_there:
+                dup = False   # it was removed by hand since — creating it again is what was asked
+        if dup:
             a = Action(app, op, key, Status.skipped_duplicate, detail="already sent")
             self.p.ledger_append({"ts": _now(), "run_id": run_id, "intent": s.intent.value, "app": app, "op": op, "idempotency_key": key,
                                   "status": "skipped_duplicate", "evidence": "same key already done"})

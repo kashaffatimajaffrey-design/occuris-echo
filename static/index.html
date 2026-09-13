@@ -176,6 +176,7 @@ const SR=window.SpeechRecognition||window.webkitSpeechRecognition; let rec=null,
 let buffer=[], wantListening=false, silence=null; const SILENCE_MS=8000;
 function listen(){ if(!SR){$('sub').textContent='Voice input needs Edge or Chrome — the text box works the same.';return}
   if(rec){ wantListening=false; rec.stop(); return }   // second click = done
+  speechSynthesis.cancel();                             // never let the mic hear Echo's own voice
   buffer=[]; wantListening=true; startSession();
 }
 function armSilence(){ clearTimeout(silence); silence=setTimeout(()=>{ wantListening=false; if(rec) rec.stop(); }, SILENCE_MS); }
