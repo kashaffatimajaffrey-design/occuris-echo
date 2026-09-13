@@ -1382,6 +1382,60 @@
           "19:00"
         ]
       }
+    },
+    {
+      "id": "B28",
+      "set": "B",
+      "transcript": "Tell my sister",
+      "expect": {
+        "intent": "CLARIFY",
+        "question_has": [
+          "say to Priya"
+        ],
+        "actions": [],
+        "no_writes": true,
+        "state": {
+          "slack": 0
+        }
+      }
+    },
+    {
+      "id": "A19",
+      "set": "A",
+      "turns": [
+        "Reply to Dr. Patel that, Thursday two PM works. Put it on my calendar and tell my sister",
+        "yes"
+      ],
+      "expect": {
+        "actions": [
+          {
+            "app": "gmail",
+            "op": "reply",
+            "status": "done"
+          },
+          {
+            "app": "calendar",
+            "op": "create",
+            "status": "done"
+          },
+          {
+            "app": "slack",
+            "op": "post",
+            "status": "done"
+          }
+        ],
+        "readback_not": [
+          "None"
+        ],
+        "state": {
+          "sent": 1,
+          "events": 1,
+          "slack": 1
+        },
+        "event_times": [
+          "14:00"
+        ]
+      }
     }
   ]
 }

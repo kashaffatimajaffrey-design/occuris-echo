@@ -19,7 +19,7 @@ GARBAGE = re.compile(r"\[(static|unintelligible|inaudible|noise)\]", re.I)
 SENSITIVE = re.compile(r"\b(password|passcode|pin|otp|cvv|card number|social security|ssn)\b", re.I)
 INJECTION = re.compile(r"(ignore (all |any )?(prior|previous) instructions|forward (this )?(thread|email) to all|ai assistant:|system:)", re.I)
 
-CLAUSE_SPLIT = re.compile(r"(?<![Dd]r)(?<![Mm]r)(?<![Mm]s)(?<![Mm]rs)(?<![Ss]t)\.\s+(?!\d{1,2}(?::\d{2})?\s*(?:am|pm)\b)|,\s*(?:and\s+)?(?!\d{1,2}(?::\d{2})?\s*(?:am|pm)\b)|\?\s+|\s+and then\s+|\s+then\s+|\s+and\s+(?:also\s+|please\s+)?(?=(?:tell|put|add|email|reply|send|move|remind|text|message|notify|at\s+\d|my\s+(?:sister|brother)|(?:on|for)\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow)|tomorrow|next\s+week))", re.I)
+CLAUSE_SPLIT = re.compile(r"(?<![Dd]r)(?<![Mm]r)(?<![Mm]s)(?<![Mm]rs)(?<![Ss]t)(?<!\bthat)(?<!\bsaying)(?<!\bsay)\.\s+(?!\d{1,2}(?::\d{2})?\s*(?:am|pm)\b)|(?<!\bthat)(?<!\bsaying)(?<!\bsay),\s*(?:and\s+)?(?!\d{1,2}(?::\d{2})?\s*(?:am|pm)\b)|\?\s+|\s+and then\s+|\s+then\s+|\s+and\s+(?:also\s+|please\s+)?(?=(?:tell|put|add|email|reply|send|move|remind|text|message|notify|at\s+\d|my\s+(?:sister|brother)|(?:on|for)\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow)|tomorrow|next\s+week))", re.I)
 
 
 def strip_disfluencies(text: str) -> str:
@@ -126,7 +126,7 @@ def detect_intent(clause: str) -> Intent | None:
     if polite:
         c = c[polite.end():]
     has_verb = re.search(r"\b(reply|respond|email|mail|send|tell|text|message|notify|ping|put|add|schedule|book|move|reschedule|change|edit|fix|correct|update|rename|delete|remove|remind)\b", c)
-    if re.search(r"\b(what'?s on|what is on|what do i (have|need)|do i have|did i|have i|is there|am i free|any slots?|any time|when am i free|what times?|available|tell me if|let me know if|tell me when|look at my (schedule|calendar|week|day)|check my (schedule|calendar)|see if i(?:'m| am) free|when (do|will) i have|when i have (time|a slot)|i'?m free|i am free)\b", c) \
+    if re.search(r"\b(what'?s on|what is on|what do i (have|need)|do i have|did i|have i|is there|am i free|any slots?|any time|when am i free|what times?|available|tell me if|let me know if|tell me when|look at my (schedule|calendar|week|day)|check my (schedule|calendar)|see if i(?:'m| am) free|when (do|will) i have|when i have (time|a slot)|i'?m free|i am free|show me (my )?(schedule|calendar|week|day)|what'?s my (schedule|calendar|week|day)|my schedule for)\b", c) \
             or (c.rstrip().endswith("?") and not has_verb):
         return Intent.QUERY
     if re.search(r"\b(reply|respond|write back)\b", c): return Intent.REPLY_EMAIL
@@ -150,7 +150,7 @@ def detect_intent(clause: str) -> Intent | None:
 
 
 RECIP = re.compile(r"\b(?:reply to|respond to|email|mail|tell|text|message|notify|ping|send|let)\s+(?:(?:a|an|the)\s+(?:message|note|email|text|mail|reminder)\s+to\s+|(?:it|this|that|these|the details|the invite)\s+to\s+)?(?:to\s+)?((?:dr\.?\s+|doctor\s+)?[a-z][a-z.]*(?:\s+[a-z][a-z.]*)?)", re.I)
-MSG_SAY = re.compile(r"\b(?:that|saying|say|:|about|regarding)\s+(.+)$", re.I)
+MSG_SAY = re.compile(r"\b(?:that|saying|say|:|about|regarding)\s*,?\s+(.+)$", re.I)
 
 
 def extract_recipient(clause: str, contacts: Contacts) -> tuple[Slot, list[dict], str]:

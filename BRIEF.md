@@ -1,6 +1,6 @@
 # Occuris Echo — system & reliability brief
 
-**44 of 44 known-answer cases pass. 0 silent failures. 0 over-clarifications. With the deterministic layer disabled: 3 silent failures.**
+**55 of 55 known-answer cases pass. 0 silent failures. 0 over-clarifications. With the deterministic layer disabled: 3 silent failures.**
 
 ## Who it's for, and why reliability is the product
 
@@ -41,7 +41,7 @@ voice / text → parse (rules first, model tagged) → gate → providers (twins
 
 **Over-clarification** is measured too (A-set cases where it asked instead of acting): 0. An agent that asks about everything is not accessible; it is a different tax on the user.
 
-**Interactions per task**, measured by hand in the real apps: replying to an email, creating a calendar event and posting to Slack took **[N] clicks/keystrokes across three apps**. With Echo: one sentence and one "yes."
+**Interactions per task**, done by hand in the real apps: open Gmail, find the thread, reply, type, send; open Calendar, pick the slot, type a title, set the time, save; open Slack, pick the channel, type, send — three apps, three context switches, typing in each. With Echo: one sentence and one "yes." (I did not measure exact click counts — the comparison is qualitative.)
 
 ## Live run
 

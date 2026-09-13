@@ -604,5 +604,29 @@
     },
     "silent_failure": false,
     "over_clarified": false
+  },
+  "B28": {
+    "set": "B",
+    "steps": {
+      "intent": true,
+      "actions": true,
+      "question": true,
+      "no_writes": true,
+      "state": true,
+      "refused_correctly": true
+    },
+    "silent_failure": false,
+    "over_clarified": false
+  },
+  "A19": {
+    "set": "A",
+    "steps": {
+      "actions": true,
+      "event_times": true,
+      "readback_clean": true,
+      "state": true
+    },
+    "silent_failure": false,
+    "over_clarified": false
   }
 }

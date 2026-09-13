@@ -75,8 +75,13 @@ class Agent:
             rb = self._answer_query(subs[0], transcript)
             asker = ctx["asker"]
             what = asker.title.value or asker.recipient.value or "that"
+            if ctx.get("reminded"):
+                self._ctx = None   # asked once already; the user has moved on
+                tr = Trace(run_id, transcript, transcript, Intent.QUERY, subs, Gate.AUTO_OK, [], rb)
+                self.traces.append(tr); return tr
             rb = rb.rstrip(".") + f". And I still need an answer on the earlier one — {asker.question}"
             tr = Trace(run_id, transcript, transcript, Intent.QUERY, subs, Gate.AUTO_OK, [], rb, question=asker.question)
+            ctx["reminded"] = True
             self.traces.append(tr); self._ctx = ctx
             return tr
         if self._ctx and subs and any(x.clause == "__correct_person__" for x in subs):
@@ -311,6 +316,8 @@ class Agent:
                     s.message = Slot(text, Source.deterministic, 0.7, "shared with sibling clause")
                 elif whens:
                     s.message = Slot(f"{speak_when(whens[-1])} works", Source.deterministic, 0.6, "from shared time")
+                elif not s.question:
+                    s.question = f"What should I say to {_short(s.recipient.value) if s.recipient.value else 'them'}?"
         # UPDATE_EVENT with a time but no day: keep the event's own date
         for s in subs:
             if s.intent == Intent.UPDATE_EVENT and s.datetime.value and "no-day" in (s.datetime.evidence or ""):
@@ -404,7 +411,7 @@ class Agent:
             return
         q = asker.question.lower()
         kind = "who" if ("which one" in q or "don't have a contact" in q or "who should" in q) else \
-               "message" if "message say" in q else \
+               "message" if ("message say" in q or "what should i say to" in q) else \
                "title" if ("call that" in q or "call it" in q) else \
                "similar" if "is this the same one" in q else "when"
         mention = None
@@ -510,6 +517,8 @@ class Agent:
 
     def _call(self, s: SubIntent) -> str:
         row = self._contact(s.recipient.value) if s.recipient.value else None
+        if s.intent in (Intent.NOTIFY, Intent.SEND_EMAIL) and not (s.message.value or "").strip():
+            raise ProviderError("slack" if s.intent == Intent.NOTIFY else "gmail", 400, "there was no message to send, so I didn't")
         if s.intent == Intent.REPLY_EMAIL:
             th = self.p.gmail_find_thread(row["email"])
             body = s.message.value or (f"{speak_when(s.datetime.value)} works for me." if s.datetime.value else "Confirmed.")
