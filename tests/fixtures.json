@@ -896,6 +896,118 @@
           "events": 2
         }
       }
+    },
+    {
+      "id": "B20",
+      "set": "B",
+      "turns": [
+        "Put dentist on my calendar Friday at 11",
+        "same"
+      ],
+      "scenario": {
+        "calendar": [
+          {
+            "id": "e1",
+            "title": "Dentist",
+            "start": "2026-09-18T10:00",
+            "end": "2026-09-18T10:30"
+          }
+        ]
+      },
+      "expect": {
+        "intent": "CLARIFY",
+        "question_has_first": [
+          "already have",
+          "Dentist",
+          "same"
+        ],
+        "readback_has": [
+          "Updated",
+          "11"
+        ],
+        "state": {
+          "events": 0
+        },
+        "event_times": [
+          "11:00"
+        ]
+      }
+    },
+    {
+      "id": "B21",
+      "set": "B",
+      "turns": [
+        "Put dentist on my calendar Friday at 11",
+        "different"
+      ],
+      "scenario": {
+        "calendar": [
+          {
+            "id": "e1",
+            "title": "Dentist",
+            "start": "2026-09-18T10:00",
+            "end": "2026-09-18T10:30"
+          }
+        ]
+      },
+      "expect": {
+        "readback_has": [
+          "Added",
+          "dentist"
+        ],
+        "state": {
+          "events": 1
+        }
+      }
+    },
+    {
+      "id": "B22",
+      "set": "B",
+      "transcript": "Delete the dentist on Friday",
+      "scenario": {
+        "calendar": [
+          {
+            "id": "e1",
+            "title": "Dentist",
+            "start": "2026-09-18T10:00",
+            "end": "2026-09-18T10:30"
+          }
+        ]
+      },
+      "expect": {
+        "intent": "CLARIFY",
+        "question_has": [
+          "don't delete"
+        ],
+        "no_writes": true,
+        "state": {
+          "events": 0
+        }
+      }
+    },
+    {
+      "id": "B23",
+      "set": "B",
+      "transcript": "The dentist you put on Friday, change it to 11",
+      "scenario": {
+        "calendar": [
+          {
+            "id": "e1",
+            "title": "Dentist",
+            "start": "2026-09-18T10:00",
+            "end": "2026-09-18T10:30"
+          }
+        ]
+      },
+      "expect": {
+        "intent": "UPDATE_EVENT",
+        "gate": "CONFIRM_REQUIRED",
+        "readback_has": [
+          "Dentist",
+          "11"
+        ],
+        "no_writes": true
+      }
     }
   ]
 }

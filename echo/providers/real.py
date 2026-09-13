@@ -136,6 +136,18 @@ class Real:
             out.append({"id": e["id"], "title": e.get("summary", "(untitled)"), "start": s[:16], "end": en[:16]})
         return out
 
+    def calendar_upcoming(self, days=14):
+        now = datetime.now()
+        r = self.cal.events().list(calendarId="primary", timeMin=(now - timedelta(days=1)).isoformat() + "+05:00",
+                                   timeMax=(now + timedelta(days=days)).isoformat() + "+05:00",
+                                   maxResults=100, singleEvents=True, orderBy="startTime").execute()
+        out = []
+        for e in r.get("items", []):
+            s = e.get("start", {}).get("dateTime") or e.get("start", {}).get("date", "")
+            en = e.get("end", {}).get("dateTime") or e.get("end", {}).get("date", "")
+            out.append({"id": e["id"], "title": e.get("summary", "(untitled)"), "start": s[:16], "end": en[:16]})
+        return out
+
     def calendar_find(self, title_like):
         t = title_like.lower()
         now = datetime.now()

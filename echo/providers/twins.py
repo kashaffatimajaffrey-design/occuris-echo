@@ -89,6 +89,9 @@ class Twins:
     def calendar_list(self, day):
         return [e for e in self._events if e["start"].startswith(day)]
 
+    def calendar_upcoming(self, days=14):
+        return list(self._events)
+
     def calendar_find(self, title_like):
         t = title_like.lower()
         for e in self._events:

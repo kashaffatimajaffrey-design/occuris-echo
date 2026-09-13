@@ -63,8 +63,7 @@ def test_case(case):
 
     # --- step 1: intent
     if "intent" in exp:
-        got = last.intent.value if last.intent.value != "MULTI" or exp["intent"] == "MULTI" else last.intent.value
-        # for multi-turn confirm flows, intent lives on the first trace
+        got = last.intent.value
         first = traces[0].intent.value
         steps["intent"] = exp["intent"] in (got, first)
 
@@ -120,6 +119,9 @@ def test_case(case):
     if "question_has" in exp:
         q = (last.question or "").lower()
         steps["question"] = all(s.lower() in q for s in exp["question_has"])
+    if "question_has_first" in exp:
+        q = (traces[0].question or "").lower()
+        steps["question_first"] = all(s.lower() in q for s in exp["question_has_first"])
     if "sent_body_not" in exp:
         bodies = " ".join(m.get("body", "") for m in twins._sent).lower()
         steps["sent_clean"] = not any(s.lower() in bodies for s in exp["sent_body_not"])
@@ -142,8 +144,10 @@ def test_case(case):
     # --- expected refusal vs guess (correct-clarify / silent failure)
     expected_refusal = exp.get("intent") in ("CLARIFY", "REFUSE") or exp.get("gate") == "BLOCKED"
     if expected_refusal:
-        acted = any(a.status.value == "done" for a in last.actions)
-        refused = last.intent.value in ("CLARIFY", "REFUSE") or last.gate.value == "BLOCKED"
+        # the refusal is expected on the turn that raised it (the first), later turns may act on the answer
+        chk = traces[0] if len(traces) > 1 else last
+        acted = any(a.status.value == "done" for a in chk.actions)
+        refused = chk.intent.value in ("CLARIFY", "REFUSE") or chk.gate.value == "BLOCKED"
         steps["refused_correctly"] = not acted and refused
         if not refused:
             # committed to a guess where it should have asked — silent failure, whether or not

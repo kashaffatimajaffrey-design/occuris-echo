@@ -109,7 +109,7 @@ def parse_when(text: str, today: datetime) -> tuple[Slot, bool]:
 
 
 # ---------------------------------------------------------------- intents
-RENAME = re.compile(r"(?:it'?s\s+)?not\s+(?:a\s+|an\s+|the\s+)?([a-z][a-z ]*?),?\s+(?:it'?s\s+)?(?:supposed to be\s+|meant to be\s+|should be\s+)?(?:a\s+|an\s+|the\s+)?([a-z][a-z ]*?)(?:\s*$|[.,])|\b(?:call it|rename it to|name it|change (?:the )?(?:name|title) to)\s+(?:a\s+|an\s+|the\s+)?([a-z][a-z ]*?)\s*$", re.I)
+RENAME = re.compile(r"(?:it'?s\s+)?not\s+(?:a\s+|an\s+|the\s+)?([a-z][a-z ]*?),?\s+(?:it'?s\s+)?(?:supposed to be\s+|meant to be\s+|should be\s+)?(?:a\s+|an\s+|the\s+)?([a-z][a-z ]*?)(?:\s*$|[.,])|\b(?:call it|rename it to|name it|change (?:the )?(?:name|title) to)\s+(?:a\s+|an\s+|the\s+)?([a-z][a-z ]*?)\s*$|\brename\s+(?:the\s+)?([a-z][a-z ]*?)\s+to\s+(?:a\s+|an\s+|the\s+)?([a-z][a-z ]*?)\s*$", re.I)
 
 
 def detect_intent(clause: str) -> Intent | None:
@@ -120,7 +120,8 @@ def detect_intent(clause: str) -> Intent | None:
     if re.search(r"\b(reply|respond|write back)\b", c): return Intent.REPLY_EMAIL
     if re.search(r"\b(email|mail)\b", c): return Intent.SEND_EMAIL
     if re.search(r"\bsend\b", c): return Intent.SEND_EMAIL
-    if re.search(r"\b(move|reschedule|push|shift)\b", c): return Intent.UPDATE_EVENT
+    if re.search(r"\b(delete|remove|cancel the|get rid of)\b", c): return Intent.UPDATE_EVENT  # handled as "no delete" in the agent
+    if re.search(r"\b(move|reschedule|push|shift|change|edit|update)\b", c) and not re.search(r"\b(reply|email|tell)\b", c): return Intent.UPDATE_EVENT
     if re.search(r"\b(put|add|schedule|book|calendar|stick)\b", c) or re.search(r"\bi(?:'ve| have)? ?(?:got|have) (a|an|the)\b", c) or re.search(r"\bi need to go\b", c):
         return Intent.CREATE_EVENT
     if re.search(r"\b(tell|text|message|notify|let .* know|ping)\b", c): return Intent.NOTIFY
@@ -179,8 +180,11 @@ def extract_title(clause: str) -> Slot:
         return Slot(m.group(1).strip(), Source.deterministic, 0.8, "book X")
     m = re.search(r"\b(?:go for|go to)\s+(.+?)(?:\s+with\b|$)", c)
     if m: return Slot(m.group(1).strip(), Source.deterministic, 0.8, "go for X")
-    m = re.search(r"\b(?:move|reschedule)\s+(?:the\s+)?([a-z ]+?)\s+to\b", c)
-    if m: return Slot(m.group(1).strip(), Source.deterministic, 0.9, "move X to")
+    m = re.search(r"\b(?:the\s+)([a-z]+(?:\s+[a-z]+)?)\s+(?:thing\s+|one\s+|appointment\s+|event\s+)?(?:you|that you|i)\s+(?:put|added|registered|booked|scheduled)\b", c)
+    if m: return Slot(m.group(1).strip(), Source.deterministic, 0.85, "the X you put")
+    m = re.search(r"\b(?:move|reschedule|change|edit|update|delete|remove|cancel)\s+(?:the\s+)?([a-z ]+?)\s+(?:to|on|from|for)\b", c)
+    if m and m.group(1).strip() not in ("it", "that", "this", "the time", "time"):
+        return Slot(m.group(1).strip(), Source.deterministic, 0.85, "verb X to")
     m = re.match(r"^\s*(?:also\s+)?(?:a\s+|an\s+|the\s+)?([a-z]+(?:\s+with\s+[a-z ]+?)?)\s+(?:at|on|from)\s+\d", c)
     if m: return Slot(m.group(1).strip(), Source.deterministic, 0.75, "noun before time")
     return Slot(None, Source.none)
@@ -213,11 +217,25 @@ def parse(transcript: str, contacts: Contacts, today: datetime, ablate: bool = F
     # a correction of the last thing done ("it's not a meeting, it's a lunch") is one intent, not two clauses
     rm = RENAME.search(cleaned.lower())
     if rm and not re.search(r"(reply|email|tell|put|add|schedule|book)", cleaned.lower()):
-        new_title = (rm.group(2) or rm.group(3) or "").strip()
+        new_title = (rm.group(2) or rm.group(3) or rm.group(5) or "").strip()
+        old_title = (rm.group(1) or rm.group(4) or "").strip()
         si = SubIntent(intent=Intent.RENAME_EVENT, clause=cleaned)
         si.title = Slot(new_title, Source.deterministic, 0.9, "rename phrase") if new_title else Slot(None, Source.none)
+        if old_title:
+            si.recipient = Slot(old_title, Source.deterministic, 0.8, "old name in utterance")
         if not new_title:
             si.question = "What should I call it?"
+        return [si], meta
+    # "the dentist you put on Friday, change it to 11" — a reference to an existing event, one intent
+    ref = re.search(r"\bthe\s+([a-z]+(?:\s+[a-z]+)?)\s+(?:thing\s+|one\s+|appointment\s+|event\s+)?(?:you|that you|i|we)\s+(?:put|added|registered|booked|scheduled|have)\b", cleaned.lower())
+    if ref and re.search(r"\b(change|move|update|edit|make it|reschedule|push|shift|rename|delete|remove)\b", cleaned.lower()):
+        si = SubIntent(intent=Intent.UPDATE_EVENT, clause=cleaned)
+        si.title = Slot(ref.group(1).strip(), Source.deterministic, 0.85, "the X you put")
+        tail = cleaned.lower()[ref.end():]
+        when, _ = parse_when(tail, today)
+        si.datetime = when
+        if not when.value and not re.search(r"\b(delete|remove)\b", cleaned.lower()):
+            si.question = f"What should I change about {si.title.value} — the time, or the name?"
         return [si], meta
     clauses = split_clauses(cleaned)
     carry_recipient: Slot | None = None

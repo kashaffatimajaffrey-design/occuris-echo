@@ -415,5 +415,50 @@
     },
     "silent_failure": false,
     "over_clarified": false
+  },
+  "B20": {
+    "set": "B",
+    "steps": {
+      "intent": true,
+      "event_times": true,
+      "readback": true,
+      "question_first": true,
+      "state": true,
+      "refused_correctly": true
+    },
+    "silent_failure": false,
+    "over_clarified": false
+  },
+  "B21": {
+    "set": "B",
+    "steps": {
+      "readback": true,
+      "state": true
+    },
+    "silent_failure": false,
+    "over_clarified": false
+  },
+  "B22": {
+    "set": "B",
+    "steps": {
+      "intent": true,
+      "question": true,
+      "no_writes": true,
+      "state": true,
+      "refused_correctly": true
+    },
+    "silent_failure": false,
+    "over_clarified": false
+  },
+  "B23": {
+    "set": "B",
+    "steps": {
+      "intent": true,
+      "gate": true,
+      "readback": true,
+      "no_writes": true
+    },
+    "silent_failure": false,
+    "over_clarified": false
   }
 }

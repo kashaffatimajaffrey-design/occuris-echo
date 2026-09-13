@@ -65,7 +65,16 @@ class Agent:
 
         # 2. parse — merging a short answer into the previous question's sentence if there is one
         subs, meta = parse(transcript, self.contacts, self.today, ablate=self.ablate)
-        if self._ctx and (not subs or len(transcript.split()) <= 4):
+        if self._ctx and self._ctx["kind"] == "similar" and re.match(r"^\s*(same|yes|yeah|it'?s the same|the same|update it|merge)", transcript, re.I):
+            asker = self._ctx["asker"]
+            s_upd = SubIntent(intent=Intent.UPDATE_EVENT, clause=asker.conflict)
+            s_upd.title = asker.title; s_upd.datetime = asker.datetime
+            s_upd.recipient = Slot(asker.conflict, Source.deterministic, 0.9, "existing event id")
+            subs = [s_upd]; meta = {"cleaned": transcript, "corrections": []}
+        elif self._ctx and self._ctx["kind"] == "similar" and re.match(r"^\s*(different|no|new|add it|another|separate)", transcript, re.I):
+            asker = self._ctx["asker"]; asker.question = None; asker.conflict = None; asker.clause = "__force_create__"
+            subs = self._ctx["subs"]; meta = {"cleaned": transcript, "corrections": []}
+        elif self._ctx and (not subs or len(transcript.split()) <= 4):
             if self._ctx["kind"] == "title":
                 asker = self._ctx["asker"]
                 asker.title = Slot(transcript.strip(" ."), Source.deterministic, 0.9, "user named it when asked")
@@ -122,17 +131,37 @@ class Agent:
                 else:
                     s.question = "What should I call that on your calendar?"
                     self._remember_question(cleaned, subs)
-        # RENAME_EVENT: target the most recent calendar event this session created
+        # RENAME_EVENT: by the old name if given, else the most recent event this session created
         for s in subs:
             if s.intent == Intent.RENAME_EVENT:
+                ev = self.p.calendar_find(s.recipient.value) if s.recipient.value else None
+                if ev:
+                    s.clause, s.datetime = ev["id"], Slot(ev["start"], Source.deterministic, 0.9, "existing event")
+                    s.recipient = Slot(ev["title"], Source.deterministic, 0.9, "matched by name")
+                    continue
                 last = next((r for r in reversed(self.p.ledger_rows()) if r.get("app") == "calendar" and r.get("status") == "done" and r.get("event_id")), None)
                 if not last:
-                    s.question = "Which event should I rename? I haven't added one in this session."
+                    s.question = "Which event should I rename? Say its name."
                 else:
-                    s.conflict = None
                     s.datetime = Slot(last.get("datetime"), Source.deterministic, 0.9, "the event just created")
-                    s.clause = last["event_id"]  # carry the id
+                    s.clause = last["event_id"]
                     s.recipient = Slot(last.get("title"), Source.deterministic, 0.9, "old title")
+        # UPDATE_EVENT phrased as delete: we never delete — say so and offer to change it instead
+        for s in subs:
+            if s.intent == Intent.UPDATE_EVENT and re.search(r"\b(delete|remove|get rid of|cancel the)\b", transcript, re.I):
+                ev = self.p.calendar_find(s.title.value or "")
+                s.question = (f"I don't delete things — that's deliberate, so nothing disappears by accident. "
+                              f"I can change “{ev['title']}” instead: say a new time or a new name." if ev
+                              else "I don't delete things — that's deliberate. Which event did you mean, and what should change?")
+        # CREATE_EVENT: is there already something similar? Ask "same or different?" — the user may have forgotten.
+        for s in subs:
+            if s.intent == Intent.CREATE_EVENT and s.title.value and s.datetime.value and not s.question and s.clause != "__force_create__":
+                sim = self._similar_event(s.title.value, s.datetime.value)
+                if sim:
+                    s.question = (f"You already have “{sim['title']}” {speak_when(sim['start'])}. Is this the same one? "
+                                  f"Say “same” and I'll update it with the new details, or “different” to add another.")
+                    s.conflict = sim["id"]  # remembered for the answer
+                    self._remember_question(cleaned, subs)
         # share a message across NOTIFY siblings ("tell A and B I'll be late")
         msgs = [s.message.value for s in subs if s.message.value]
         whens = [s.datetime.value for s in subs if s.datetime.value]
@@ -223,7 +252,8 @@ class Agent:
         q = asker.question.lower()
         kind = "who" if ("which one" in q or "don't have a contact" in q or "who should" in q) else \
                "message" if "message say" in q else \
-               "title" if ("call that" in q or "call it" in q) else "when"
+               "title" if ("call that" in q or "call it" in q) else \
+               "similar" if "is this the same one" in q else "when"
         mention = None
         if kind == "who":
             m = re.search(r"called (\w[\w .]*?)\.", asker.question) or None
@@ -349,6 +379,17 @@ class Agent:
             self.p.calendar_rename(s.clause, s.title.value)
             return f"Renamed “{s.recipient.value}” to “{s.title.value}”, {speak_when(s.datetime.value)}"
         if s.intent == Intent.UPDATE_EVENT:
+            if s.recipient.evidence == "existing event id":
+                eid = s.recipient.value
+                ev = next((e for e in self.p.calendar_upcoming() if e["id"] == eid), None)
+                if not ev:
+                    raise ProviderError("calendar", 404, "event not found")
+                changed = []
+                if s.datetime.value and s.datetime.value[:16] != ev["start"][:16]:
+                    self.p.calendar_update(eid, s.datetime.value); changed.append(f"time to {speak_when(s.datetime.value)}")
+                if s.title.value and s.title.value.lower() != ev["title"].lower() and len(s.title.value) >= len(ev["title"]):
+                    self.p.calendar_rename(eid, s.title.value); changed.append(f"name to “{s.title.value}”")
+                return f"Updated “{ev['title']}” — " + (", ".join(changed) if changed else "nothing needed changing") + ". No duplicate added"
             ev = self.p.calendar_find(s.title.value or "")
             if not ev:
                 raise ProviderError("calendar", 404, "event not found")
@@ -366,10 +407,27 @@ class Agent:
         if s.intent == Intent.NOTIFY:
             return not self._trusted(s)
         if s.intent == Intent.UPDATE_EVENT:
-            return True
+            return s.recipient.evidence != "existing event id"  # "same" answer is the confirmation
         if s.intent == Intent.CREATE_EVENT:
             return bool(s.conflict)
         return False
+
+    def _similar_event(self, title: str, start_iso: str) -> dict | None:
+        """An existing event with a similar name within a week either side — the user may have forgotten it."""
+        try:
+            target = datetime.fromisoformat(start_iso)
+        except ValueError:
+            return None
+        for e in self.p.calendar_upcoming(14):
+            try:
+                st = datetime.fromisoformat(e["start"])
+            except (ValueError, TypeError):
+                continue
+            if abs((st - target).days) <= 7 and _similar_titles(e.get("title") or "", title):
+                if st == target and (e.get("title") or "").lower() == title.lower():
+                    continue  # exact duplicate: idempotency handles it
+                return e
+        return None
 
     def _trusted(self, s: SubIntent) -> bool:
         row = self._contact(s.recipient.value) if s.recipient.value else None
@@ -448,6 +506,16 @@ class Agent:
             tr.readback = tr.readback.rstrip(".") + f". Also, I'm still waiting on your yes for {still} — send it?"
         self.traces.append(tr)
         return tr
+
+
+def _similar_titles(a: str, b: str) -> bool:
+    from difflib import SequenceMatcher
+    a, b = a.lower().strip(), b.lower().strip()
+    if not a or not b:
+        return False
+    if a in b or b in a:
+        return True
+    return SequenceMatcher(None, a, b).ratio() >= 0.72
 
 
 def _short(name: str) -> str:
