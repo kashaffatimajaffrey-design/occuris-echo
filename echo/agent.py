@@ -382,6 +382,8 @@ class Agent:
         return None
 
     def _key(self, s: SubIntent) -> str:
+        if s.intent == Intent.RENAME_EVENT:
+            return idempotency_key(s.intent, s.clause, s.datetime.value, s.title.value)  # event id + new name
         return idempotency_key(s.intent, s.recipient.value or s.title.value, s.datetime.value, s.message.value)
 
     def _answer_query(self, s: SubIntent, transcript: str) -> str:
