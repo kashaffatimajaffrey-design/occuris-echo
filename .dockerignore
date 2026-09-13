@@ -1,0 +1,9 @@
+.env
+credentials.json
+token.json
+dryrun/
+PLAYBOOK.pdf
+.git/
+.claude/
+__pycache__/
+.pytest_cache/
