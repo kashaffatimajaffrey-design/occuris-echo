@@ -19,7 +19,7 @@ GARBAGE = re.compile(r"\[(static|unintelligible|inaudible|noise)\]", re.I)
 SENSITIVE = re.compile(r"\b(password|passcode|pin|otp|cvv|card number|social security|ssn)\b", re.I)
 INJECTION = re.compile(r"(ignore (all |any )?(prior|previous) instructions|forward (this )?(thread|email) to all|ai assistant:|system:)", re.I)
 
-CLAUSE_SPLIT = re.compile(r",\s*(?:and\s+)?|\s+and then\s+|\s+then\s+|\s+and\s+(?=(?:tell|put|add|email|reply|send|move|remind|text|message|notify|at\s+\d|my\s+(?:sister|brother)))", re.I)
+CLAUSE_SPLIT = re.compile(r",\s*(?:and\s+)?|\s+and then\s+|\s+then\s+|\s+and\s+(?=(?:tell|put|add|email|reply|send|move|remind|text|message|notify|at\s+\d|my\s+(?:sister|brother)|(?:on|for)\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow)|tomorrow|next\s+week))", re.I)
 
 
 def strip_disfluencies(text: str) -> str:
@@ -104,7 +104,7 @@ def parse_when(text: str, today: datetime) -> tuple[Slot, bool]:
         return Slot(None, Source.none), ambiguous
     dt = day.replace(hour=hour or 0, minute=minute or 0, second=0, microsecond=0)
     conf = 0.95 if (hour is not None and tm and tm.group(3)) else 0.8
-    ev = ("no-day; " if no_day else "") + f"weekday/time rule on '{text[:40]}'"
+    ev = ("no-day; " if no_day else "") + ("no-hour; " if hour is None else "") + f"weekday/time rule on '{text[:40]}'"
     return Slot(dt.isoformat(timespec="minutes"), Source.deterministic, conf, ev), ambiguous
 
 
@@ -170,8 +170,9 @@ def extract_title(clause: str) -> Slot:
         return Slot(m.group(1).strip(), Source.deterministic, 0.9, "put X on calendar")
     m = re.search(r"\bi(?:'ve| have)? ?(?:got|have) (?:a|an|the)\s+([a-z ]+?)\s+(?:at|on|with|friday|monday|tuesday|wednesday|thursday|saturday|sunday|tomorrow)\b", c) or re.search(r"\bi(?:'ve| have)? ?(?:got|have) (?:a|an|the)\s+([a-z]+)", c)
     if m: return Slot(m.group(1).strip(), Source.deterministic, 0.85, "I have a X")
-    m = re.search(r"\b(?:add|schedule|book)\s+(.+?)\s+(?:on|at|for)\b", c)
-    if m: return Slot(m.group(1).strip(), Source.deterministic, 0.8, "add X at")
+    m = re.search(r"\b(?:add|schedule|book)\s+(?:me\s+)?(?:up\s+)?(?:for\s+)?(?:a\s+|an\s+|the\s+)?([a-z][a-z ]*?)\s+(?:on|at|for|\Z)", c)
+    if m and m.group(1).strip() not in ("me", "it", "that"):
+        return Slot(m.group(1).strip(), Source.deterministic, 0.8, "book X")
     m = re.search(r"\b(?:go for|go to)\s+(.+?)(?:\s+with\b|$)", c)
     if m: return Slot(m.group(1).strip(), Source.deterministic, 0.8, "go for X")
     m = re.search(r"\b(?:move|reschedule)\s+(?:the\s+)?([a-z ]+?)\s+to\b", c)
@@ -221,7 +222,7 @@ def parse(transcript: str, contacts: Contacts, today: datetime, ablate: bool = F
         if intent == Intent.CREATE_EVENT and subs and subs[-1].intent == Intent.CREATE_EVENT \
                 and re.search(r"\b(it|that|this)\b", cl.lower()) and not re.search(r"\d", cl):
             continue  # "…, stick it in the calendar" — same event, no new information
-        si = SubIntent(intent=intent)
+        si = SubIntent(intent=intent, clause=cl)
         if intent in (Intent.REPLY_EMAIL, Intent.SEND_EMAIL, Intent.NOTIFY):
             slot, cands, mention = extract_recipient(cl, contacts)
             si.recipient = slot
@@ -258,6 +259,8 @@ def parse(transcript: str, contacts: Contacts, today: datetime, ablate: bool = F
                     si.datetime = Slot(carry_when.value, Source.deterministic, 0.8, "inherited from earlier clause")
                 else:
                     si.question = "When should I put that — what day and time?"
+            elif intent == Intent.CREATE_EVENT and when.value.endswith("T00:00") and "no-hour" in (when.evidence or ""):
+                si.question = f"What time on {datetime.fromisoformat(when.value).strftime('%A')}?"
             if not si.title.value:
                 who = carry_recipient.value if (carry_recipient and carry_recipient.value) else None
                 si.title = Slot(f"Follow-up — {who}" if who else "Meeting",

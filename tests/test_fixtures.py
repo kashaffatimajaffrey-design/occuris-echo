@@ -71,7 +71,8 @@ def test_case(case):
     # --- step 2: slots
     if "slots" in exp:
         ok = True
-        si = traces[0].subintents[0] if traces[0].subintents else None
+        src = traces[-1] if traces[0].intent.value == "CLARIFY" and len(traces) > 1 else traces[0]
+        si = src.subintents[0] if src.subintents else None
         for k, v in exp["slots"].items():
             actual = getattr(si, k).value if si else None
             if k == "datetime":
@@ -84,7 +85,8 @@ def test_case(case):
 
     # --- step 3: gate
     if "gate" in exp:
-        steps["gate"] = traces[0].gate.value == exp["gate"]
+        gsrc = traces[-1] if traces[0].intent.value == "CLARIFY" and len(traces) > 1 else traces[0]
+        steps["gate"] = gsrc.gate.value == exp["gate"]
     if "conflict" in exp:
         steps["conflict"] = any(exp["conflict"].lower() in (s.conflict or "").lower() for s in traces[0].subintents)
 

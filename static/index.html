@@ -165,13 +165,19 @@ function speak(text){ if(!text)return; speechSynthesis.cancel(); const u=new Spe
 const SR=window.SpeechRecognition||window.webkitSpeechRecognition; let rec=null,meterTimer=null;
 function listen(){ if(!SR){$('sub').textContent='Voice input needs Edge or Chrome — the text box works the same.';return}
   if(rec){rec.stop();return}
-  rec=new SR(); rec.lang='en-US'; rec.interimResults=true; rec.continuous=false;
+  rec=new SR(); rec.lang='en-US'; rec.interimResults=true; rec.continuous=true;
+  let finals=[], silence=null; const SILENCE_MS=2500;
+  const armSilence=()=>{clearTimeout(silence); silence=setTimeout(()=>{ if(rec) rec.stop(); }, SILENCE_MS);};
   $('mic').setAttribute('aria-pressed','true'); $('bars').hidden=false; $('glyph').hidden=true;
-  $('headline').textContent='Listening'; $('sub').textContent='Take your time. I won’t cut you off.';
+  $('headline').textContent='Listening'; $('sub').textContent='Take your time — I stop after a pause of a couple of seconds, or click the orb again when you’re done.';
   meterTimer=setInterval(()=>{[...$('bars').children].forEach((b,i)=>b.style.height=(10+Math.abs(Math.sin(Date.now()/190+i*.8))*30*(.5+Math.random()*.5))+'px')},70);
-  rec.onresult=e=>{let f='',t='';for(const r of e.results)(r.isFinal?(f+=r[0].transcript):(t+=r[0].transcript));$('text').value=f||t;if(f)send(f)};
+  rec.onresult=e=>{ finals=[]; let interim='';
+    for(const r of e.results)(r.isFinal?finals.push(r[0].transcript.trim()):(interim+=r[0].transcript));
+    $('text').value=(finals.join(' ')+' '+interim).trim(); armSilence(); };
+  armSilence();
   rec.onerror=e=>{$('sub').textContent='Mic error: '+e.error+'. You can type instead.'};
-  rec.onend=()=>{rec=null;clearInterval(meterTimer);$('mic').setAttribute('aria-pressed','false');$('bars').hidden=true;$('glyph').hidden=false;if($('headline').textContent==='Listening'){$('headline').textContent='What do you need?';}};
+  rec.onend=()=>{rec=null;clearTimeout(silence);clearInterval(meterTimer);$('mic').setAttribute('aria-pressed','false');$('bars').hidden=true;$('glyph').hidden=false;
+    const said=$('text').value.trim(); if(said){ send(said); } else if($('headline').textContent==='Listening'){$('headline').textContent='What do you need?';$('sub').textContent="I didn't hear anything — try again, or type it.";}};
   rec.start();
 }
 $('mic').onclick=listen;

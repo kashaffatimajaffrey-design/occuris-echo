@@ -1,6 +1,6 @@
 # Occuris Echo — system & reliability brief
 
-**34 of 34 known-answer cases pass. 0 silent failures. 0 over-clarifications. With the deterministic layer disabled: 3 silent failures.**
+**36 of 36 known-answer cases pass. 0 silent failures. 0 over-clarifications. With the deterministic layer disabled: 3 silent failures.**
 
 ## Who it's for, and why reliability is the product
 
@@ -22,18 +22,18 @@ voice / text → parse (rules first, model tagged) → gate → providers (twins
 
 ## How we know it works
 
-**Known-answer harness**, 34 cases, each scored per step (intent · slots · gate · actions · read-back) against **twin state** — sent-mail counts, event counts, Slack posts, ledger rows — never against what the agent claims.
+**Known-answer harness**, 36 cases, each scored per step (intent · slots · gate · actions · read-back) against **twin state** — sent-mail counts, event counts, Slack posts, ledger rows — never against what the agent claims.
 
 | Set | Cases | Pass | Silent | Silent (ablation) |
 |---|---|---|---|---|
 | A clean | 9 | 9 | 0 | 0 |
-| B adversarial | 17 | 17 | 0 | 3 |
+| B adversarial | 19 | 19 | 0 | 3 |
 | C infra | 4 | 4 | 0 | 0 |
 | D read-side | 4 | 4 | 0 | 0 |
 
 **Silent failure** (Lemma's term): the agent committed to a wrong value where it should have asked, or reported "done" for an action that did not happen. Counted by name, per fixture.
 
-**Adversarial set includes:** two contacts sharing a surname (B1) · homophone names John/Joan from "Jon" (B2) · "next Thursday" said on a Thursday (B3) · mid-sentence retraction (B4) · question-not-command (B5) · "send it again" (B6) · unintelligible message body (B7) · garbage transcript (B8) · missing slots (B9) · calendar conflict (B10) · **prompt injection in the source email** (B11) · partial multi-recipient failure (B12) · password in message (B13) · confirmation never given (B14) · a real ASR mishear (B15) · disfluencies in a message body (B16) · **a real self-correction, verbatim from testing** (B17).
+**Adversarial set includes:** two contacts sharing a surname (B1) · homophone names John/Joan from "Jon" (B2) · "next Thursday" said on a Thursday (B3) · mid-sentence retraction (B4) · question-not-command (B5) · "send it again" (B6) · unintelligible message body (B7) · garbage transcript (B8) · missing slots (B9) · calendar conflict (B10) · **prompt injection in the source email** (B11) · partial multi-recipient failure (B12) · password in message (B13) · confirmation never given (B14) · a real ASR mishear (B15) · disfluencies in a message body (B16) · **a real self-correction, verbatim from testing** (B17) · **answering a question keeps every other slot** — "which Patel?" → "Anita" (B18), "what time on Thursday?" → "at 4" with the Friday event intact (B19).
 
 **Infrastructure set:** full rerun ⇒ identical app state (C1) · Gmail 500 once ⇒ retry, exactly one send (C2) · Slack 429 ⇒ email and calendar done, Slack reported failed, retried once on next run (C3) · malformed calendar event ⇒ no crash, no writes (C4).
 

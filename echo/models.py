@@ -66,6 +66,7 @@ class SubIntent:
     title: Slot = field(default_factory=Slot)
     conflict: Optional[str] = None
     question: Optional[str] = None  # set when this sub-intent needs a CLARIFY
+    clause: str = ""                # the words this sub-intent came from (for merging a later answer)
 
 
 @dataclass

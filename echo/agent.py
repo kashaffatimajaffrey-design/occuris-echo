@@ -27,6 +27,10 @@ class Agent:
         self.contacts = Contacts(providers.contacts())
         self.today = datetime.fromisoformat((today or getattr(providers, "today", None) or datetime.now().date().isoformat()) + "T09:00")
         self.traces: list[Trace] = []
+        # clarification context: the sentence that raised a question, and what was asked.
+        # A short answer on the next turn is merged back in and the whole sentence re-parsed —
+        # one relaxation pass; every other slot survives.
+        self._ctx: dict | None = None
 
     # ------------------------------------------------------------ pending (derived)
     def pending(self) -> list[dict]:
@@ -53,8 +57,14 @@ class Agent:
             tr = Trace(run_id, transcript, transcript, Intent.REFUSE, [], Gate.AUTO_OK, [], "Cancelled. Nothing was sent.")
             self.traces.append(tr); return tr
 
-        # 2. parse
+        # 2. parse — merging a short answer into the previous question's sentence if there is one
         subs, meta = parse(transcript, self.contacts, self.today, ablate=self.ablate)
+        if self._ctx and (not subs or len(transcript.split()) <= 4):
+            merged = self._merge_answer(transcript)
+            if merged:
+                transcript = merged
+                subs, meta = parse(transcript, self.contacts, self.today, ablate=self.ablate)
+        self._ctx = None
         cleaned = meta.get("cleaned", transcript)
         corrections = meta.get("corrections", [])
 
@@ -126,6 +136,7 @@ class Agent:
                                    detail=s.question or "") for s in subs if s.question]
                 rb = readback_for(actions, subs) + " " + q
                 return self._finish(Trace(run_id, transcript, cleaned, Intent.MULTI, subs, Gate.AUTO_OK, actions, rb, question=q, corrections=corrections), pend)
+            self._remember_question(cleaned, subs)
             return self._finish(Trace(run_id, transcript, cleaned, Intent.CLARIFY, subs, Gate.AUTO_OK, [], q, question=q, corrections=corrections), pend)
 
         # 6. resolve threads / conflicts / injection
@@ -166,6 +177,49 @@ class Agent:
         rb = readback_for(actions, subs, confirm=True)
         return self._finish(Trace(run_id, transcript, cleaned, top, subs, gate, actions, rb, injection_detected=injection, corrections=corrections), pend)
 
+    # ------------------------------------------------------------ clarification context
+    def _remember_question(self, cleaned: str, subs):
+        asker = next((s for s in subs if s.question), None)
+        if not asker:
+            return
+        q = asker.question.lower()
+        kind = "who" if ("which one" in q or "don't have a contact" in q or "who should" in q) else \
+               "message" if "message say" in q else "when"
+        mention = None
+        if kind == "who":
+            m = re.search(r"called (\w[\w .]*?)\.", asker.question) or None
+            mention = m.group(1) if m else None
+        self._ctx = {"text": cleaned, "kind": kind, "mention": mention, "asker": asker}
+
+    def _merge_answer(self, answer: str) -> str | None:
+        ctx = self._ctx
+        text, kind = ctx["text"], ctx["kind"]
+        a = answer.strip(" .")
+        if kind == "who":
+            # replace the ambiguous mention with the answer; fall back to appending "to <answer>"
+            asker = ctx["asker"]
+            cands, _ = self.contacts.resolve(a)
+            if len(cands) != 1:
+                return None
+            name = cands[0]["name"]
+            for alias in ("Patel", "Jon", "John", "Joan"):
+                pass
+            # find the mention the parser stumbled on: the word(s) after the verb
+            m = re.search(r"\b(reply to|respond to|email|mail|tell|text|message|notify|ping|send (?:it )?to|let)\s+((?:dr\.?\s+)?\w+)", text, re.I)
+            if m:
+                return text[:m.start(2)] + name + text[m.end(2):]
+            return f"{text} to {name}"
+        if kind == "when":
+            if not re.search(r"\bat\b|\d", a):
+                a = "at " + a
+            clause = ctx["asker"].clause
+            if clause and clause in text:
+                return text.replace(clause, f"{clause} {a}", 1)
+            return f"{text} {a}"
+        if kind == "message":
+            return f"{text} saying {a}"
+        return None
+
     # ------------------------------------------------------------ execute after "yes"
     def _execute_pending(self, run_id, transcript, pend) -> Trace:
         actions, subs = [], []
@@ -199,6 +253,8 @@ class Agent:
     def _do(self, s: SubIntent, run_id: str, key: str | None = None) -> Action:
         key = key or self._key(s)
         app, op = _app(s), _op(s)
+        if s.intent in (Intent.QUERY, Intent.CLARIFY, Intent.REFUSE):
+            return Action(app, op, key, Status.not_attempted, detail="that part was a question, not an action")
         if key in self._completed_keys():
             a = Action(app, op, key, Status.skipped_duplicate, detail="already sent")
             self.p.ledger_append({"ts": _now(), "run_id": run_id, "intent": s.intent.value, "app": app, "op": op, "idempotency_key": key,
@@ -219,7 +275,9 @@ class Agent:
                 if e.code not in RETRIES or attempt >= RETRIES[e.code]:
                     break
                 time.sleep(0.01)
-        a = Action(app, op, key, Status.failed, detail=f"{app} error {last_err.code if last_err else '?'}", latency_ms=int((time.time() - t0) * 1000))
+        why = {404: "I couldn't find that", 429: "the service is rate-limiting me", 400: "the request was rejected"}.get(
+            last_err.code if last_err else 0, f"{app} returned an error")
+        a = Action(app, op, key, Status.failed, detail=f"{why} — nothing was changed there", latency_ms=int((time.time() - t0) * 1000))
         self.p.ledger_append({"ts": _now(), "run_id": run_id, "intent": s.intent.value, "app": app, "op": op, "idempotency_key": key,
                               "status": "failed", "evidence": a.detail, "recipient": s.recipient.value, "title": s.title.value})
         return a
@@ -251,7 +309,7 @@ class Agent:
                 raise ProviderError("calendar", 404, "event not found")
             self.p.calendar_update(ev["id"], s.datetime.value)
             return f"Moved “{ev['title']}” to {speak_when(s.datetime.value)}"
-        raise ProviderError("agent", 400, "unknown intent")
+        raise ProviderError(app, 400, "unsupported action")
 
     # ------------------------------------------------------------ helpers
     def _gate(self, subs) -> Gate:

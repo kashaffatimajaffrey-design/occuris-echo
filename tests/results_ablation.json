@@ -391,5 +391,29 @@
     },
     "silent_failure": false,
     "over_clarified": false
+  },
+  "B18": {
+    "set": "B",
+    "steps": {
+      "intent": true,
+      "slots": true,
+      "gate": true,
+      "actions": false,
+      "no_writes": true
+    },
+    "silent_failure": false,
+    "over_clarified": false
+  },
+  "B19": {
+    "set": "B",
+    "steps": {
+      "intent": true,
+      "actions": true,
+      "event_times": true,
+      "readback": true,
+      "state": true
+    },
+    "silent_failure": false,
+    "over_clarified": false
   }
 }
