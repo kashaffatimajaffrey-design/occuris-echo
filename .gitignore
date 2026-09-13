@@ -9,3 +9,4 @@ node_modules/
 PLAYBOOK.pdf
 dryrun/
 *.png
+.claude/
