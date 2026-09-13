@@ -24,7 +24,8 @@ app = FastAPI(title="Occuris Echo")
 
 if os.getenv("ECHO_TWINS") == "1":
     from echo.providers.twins import Twins
-    providers = Twins()
+    from datetime import date
+    providers = Twins({"today": date.today().isoformat()})
     agent = Agent(providers, use_model=True, today=providers.today)
     MODE = "twins"
 else:

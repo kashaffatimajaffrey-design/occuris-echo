@@ -168,16 +168,30 @@ def extract_message(clause: str) -> Slot:
     return Slot(msg, Source.deterministic, 0.9, "after say/that/colon")
 
 
+VAGUE = {"something", "thing", "a thing", "an event", "event", "it", "that", "this", "them", "stuff", "an appointment", "appointment", "a meeting"}
+
+
+def _title_or_none(t: str, ev: str) -> Slot:
+    t = t.strip()
+    if not t or t in VAGUE:
+        return Slot(None, Source.none)
+    return Slot(t, Source.deterministic, 0.85, ev)
+
+
 def extract_title(clause: str) -> Slot:
     c = clause.lower()
     m = re.search(r"\b(?:put|add|schedule|book)\s+(?:the\s+|a\s+|an\s+)?(.+?)\s+(?:on|to|in)\s+(?:my\s+)?calendar", c)
-    if m and m.group(1).strip() not in ("it", "that", "this", "them"):
-        return Slot(m.group(1).strip(), Source.deterministic, 0.9, "put X on calendar")
+    if m:
+        r = _title_or_none(m.group(1), "put X on calendar")
+        if r.value: return r
     m = re.search(r"\bi(?:'ve| have)? ?(?:got|have) (?:a|an|the)\s+([a-z ]+?)\s+(?:at|on|with|friday|monday|tuesday|wednesday|thursday|saturday|sunday|tomorrow)\b", c) or re.search(r"\bi(?:'ve| have)? ?(?:got|have) (?:a|an|the)\s+([a-z]+)", c)
-    if m: return Slot(m.group(1).strip(), Source.deterministic, 0.85, "I have a X")
+    if m:
+        r = _title_or_none(m.group(1), "I have a X")
+        if r.value: return r
     m = re.search(r"\b(?:put|add|schedule|book)\s+(?:me\s+)?(?:up\s+)?(?:for\s+)?(?:a\s+|an\s+|the\s+)?([a-z][a-z ]*?)\s+(?:on|at|for|\Z)", c)
-    if m and m.group(1).strip() not in ("me", "it", "that"):
-        return Slot(m.group(1).strip(), Source.deterministic, 0.8, "book X")
+    if m and m.group(1).strip() != "me":
+        r = _title_or_none(m.group(1), "book X")
+        if r.value: return r
     m = re.search(r"\b(?:go for|go to)\s+(.+?)(?:\s+with\b|$)", c)
     if m: return Slot(m.group(1).strip(), Source.deterministic, 0.8, "go for X")
     m = re.search(r"\b(?:the\s+)([a-z]+(?:\s+[a-z]+)?)\s+(?:thing\s+|one\s+|appointment\s+|event\s+)?(?:you|that you|i)\s+(?:put|added|registered|booked|scheduled)\b", c)
@@ -219,6 +233,10 @@ def parse(transcript: str, contacts: Contacts, today: datetime, ablate: bool = F
     if rm and not re.search(r"(reply|email|tell|put|add|schedule|book)", cleaned.lower()):
         new_title = (rm.group(2) or rm.group(3) or rm.group(5) or "").strip()
         old_title = (rm.group(1) or rm.group(4) or "").strip()
+        # "call it spade. spa day" — the words after a sentence break are the correction; last version wins
+        tail = cleaned.lower()[rm.end():].strip(" .,")
+        if tail and not old_title:
+            new_title = re.split(r"[.,;]", tail)[-1].strip() or new_title
         si = SubIntent(intent=Intent.RENAME_EVENT, clause=cleaned)
         si.title = Slot(new_title, Source.deterministic, 0.9, "rename phrase") if new_title else Slot(None, Source.none)
         if old_title:

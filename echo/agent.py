@@ -65,6 +65,16 @@ class Agent:
 
         # 2. parse — merging a short answer into the previous question's sentence if there is one
         subs, meta = parse(transcript, self.contacts, self.today, ablate=self.ablate)
+        if self._ctx and subs and all(x.intent == Intent.QUERY for x in subs) and len(transcript.split()) > 4:
+            # user asked something else while a question was open — answer, then remind, keep the question
+            ctx = self._ctx
+            rb = self._answer_query(subs[0], transcript)
+            asker = ctx["asker"]
+            what = asker.title.value or asker.recipient.value or "that"
+            rb = rb.rstrip(".") + f". And I still need an answer on the earlier one — {asker.question}"
+            tr = Trace(run_id, transcript, transcript, Intent.QUERY, subs, Gate.AUTO_OK, [], rb, question=asker.question)
+            self.traces.append(tr); self._ctx = ctx
+            return tr
         if self._ctx and self._ctx["kind"] == "similar" and re.match(r"^\s*(same|yes|yeah|it'?s the same|the same|update it|merge)", transcript, re.I):
             asker = self._ctx["asker"]
             s_upd = SubIntent(intent=Intent.UPDATE_EVENT, clause=asker.conflict)
@@ -77,7 +87,7 @@ class Agent:
         elif self._ctx and (not subs or len(transcript.split()) <= 4):
             if self._ctx["kind"] == "title":
                 asker = self._ctx["asker"]
-                asker.title = Slot(transcript.strip(" ."), Source.deterministic, 0.9, "user named it when asked")
+                asker.title = Slot(_clean_title_answer(transcript), Source.deterministic, 0.9, "user named it when asked")
                 asker.question = None
                 subs = self._ctx["subs"]
                 meta = {"cleaned": self._ctx["text"] + " — " + transcript, "corrections": []}
@@ -86,6 +96,10 @@ class Agent:
                 if merged:
                     transcript = merged
                     subs, meta = parse(transcript, self.contacts, self.today, ablate=self.ablate)
+        dropped = None
+        if self._ctx and subs and any(x.intent != Intent.QUERY for x in subs) and len(transcript.split()) > 4:
+            a0 = self._ctx["asker"]
+            dropped = a0.title.value or a0.recipient.value or a0.clause[:30]
         self._ctx = None
         cleaned = meta.get("cleaned", transcript)
         corrections = meta.get("corrections", [])
@@ -227,7 +241,7 @@ class Agent:
         if gate == Gate.AUTO_OK:
             actions = [self._do(s, run_id) for s in subs]
             rb = readback_for(actions, subs)
-            return self._finish(Trace(run_id, transcript, cleaned, top, subs, gate, actions, rb, injection_detected=injection, corrections=corrections), pend)
+            return self._finish(Trace(run_id, transcript, cleaned, top, subs, gate, actions, rb, injection_detected=injection, corrections=corrections), pend, dropped)
 
         # CONFIRM_REQUIRED: record pending rows, run the AUTO_OK parts now, read back the question
         actions = []
@@ -242,7 +256,7 @@ class Agent:
             else:
                 actions.append(self._do(s, run_id))
         rb = readback_for(actions, subs, confirm=True)
-        return self._finish(Trace(run_id, transcript, cleaned, top, subs, gate, actions, rb, injection_detected=injection, corrections=corrections), pend)
+        return self._finish(Trace(run_id, transcript, cleaned, top, subs, gate, actions, rb, injection_detected=injection, corrections=corrections), pend, dropped)
 
     # ------------------------------------------------------------ clarification context
     def _remember_question(self, cleaned: str, subs):
@@ -550,7 +564,9 @@ class Agent:
                     s.recipient = Slot(first, Source.model, 0.5, "ablation: picked first candidate")
                     s.question = None
 
-    def _finish(self, tr: Trace, prior_pending) -> Trace:
+    def _finish(self, tr: Trace, prior_pending, dropped: str | None = None) -> Trace:
+        if dropped:
+            tr.readback = tr.readback.rstrip(".") + f". I've let go of the earlier unfinished one about {dropped} — say it again if you still want it."
         if prior_pending and tr.intent != Intent.CLARIFY:
             still = "; ".join(f"the {r['app']} {r['op']} to {r.get('recipient') or r.get('title')}" for r in prior_pending)
             tr.readback = tr.readback.rstrip(".") + f". Also, I'm still waiting on your yes for {still} — send it?"
@@ -566,6 +582,14 @@ def _similar_titles(a: str, b: str) -> bool:
     if a in b or b in a:
         return True
     return SequenceMatcher(None, a, b).ratio() >= 0.72
+
+
+def _clean_title_answer(text: str) -> str:
+    """'Call it spade. Spa day' → 'spa day'. Last version wins; leading 'call it' etc. stripped."""
+    parts = [p.strip() for p in re.split(r"[.,;]|\b(?:actually|i mean|sorry|no wait|no)\b", text, flags=re.I) if p and p.strip()]
+    t = parts[-1] if parts else text
+    t = re.sub(r"^(?:call it|name it|title it|make it|it'?s|its|put|just)\s+", "", t, flags=re.I).strip(" .")
+    return t or text.strip(" .")
 
 
 def _short(name: str) -> str:
